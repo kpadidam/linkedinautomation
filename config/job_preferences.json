@@ -1,0 +1,175 @@
+{
+  "job_categories": [
+    {
+      "category": "Data Analyst",
+      "keywords": [
+        "Data Analyst",
+        "Business Intelligence Analyst",
+        "Reporting Analyst",
+        "Healthcare Data Analyst",
+        "Power BI Developer",
+        "Tableau Developer",
+        "Data Visualization Specialist"
+      ],
+      "skills": [
+        "SQL",
+        "Python",
+        "Power BI",
+        "Tableau",
+        "Excel",
+        "ETL",
+        "Data Cleaning",
+        "Data Modeling",
+        "Dashboard Development",
+        "KPI Design",
+        "Reporting Automation",
+        "Agile",
+        "Stakeholder Storytelling"
+      ],
+      "location": "United States",
+      "remote_ok": true,
+      "job_type": ["full-time", "contract", "internship"],
+      "experience_level": "mid-level",
+      "posted_within": "week",
+      "max_results": 50
+    },
+
+    {
+      "category": "Data Engineer",
+      "keywords": [
+        "Data Engineer",
+        "ETL Developer",
+        "Azure Data Engineer",
+        "AWS Data Engineer",
+        "Big Data Engineer",
+        "Pipeline Developer",
+        "Cloud Data Engineer"
+      ],
+      "skills": [
+        "SQL",
+        "Python",
+        "ETL",
+        "Azure Data Factory",
+        "AWS Glue",
+        "Apache Spark",
+        "Databricks",
+        "Azure Synapse",
+        "Data Pipelines",
+        "Data Governance",
+        "MySQL",
+        "PostgreSQL",
+        "SQL Server",
+        "Oracle"
+      ],
+      "location": "United States",
+      "remote_ok": true,
+      "job_type": ["full-time", "contract", "internship"],
+      "experience_level": "mid-level",
+      "posted_within": "week",
+      "max_results": 50
+    },
+
+    {
+      "category": "Business Intelligence Developer",
+      "keywords": [
+        "BI Developer",
+        "Business Intelligence Engineer",
+        "Reporting Developer",
+        "Power BI Developer",
+        "Tableau BI Analyst",
+        "Data Visualization Engineer",
+        "Analytics Developer"
+      ],
+      "skills": [
+        "Power BI",
+        "Tableau",
+        "SQL",
+        "Excel Power Query",
+        "Data Modeling",
+        "DAX",
+        "Dashboard Development",
+        "SSIS",
+        "ETL",
+        "KPI Automation",
+        "Stakeholder Communication"
+      ],
+      "location": "United States",
+      "remote_ok": true,
+      "job_type": ["full-time", "contract", "internship"],
+      "experience_level": "mid-level",
+      "posted_within": "week",
+      "max_results": 50
+    },
+
+    {
+      "category": "Data Scientist (Entry-Level)",
+      "keywords": [
+        "Data Scientist",
+        "Machine Learning Engineer",
+        "Predictive Modeler",
+        "Statistical Analyst",
+        "AI Analyst",
+        "Junior Data Scientist"
+      ],
+      "skills": [
+        "Python",
+        "Scikit-learn",
+        "TensorFlow",
+        "Pandas",
+        "NumPy",
+        "Matplotlib",
+        "EDA",
+        "Predictive Modeling",
+        "Data Cleaning",
+        "Feature Engineering",
+        "SAS",
+        "NLP Basics"
+      ],
+      "location": "United States",
+      "remote_ok": true,
+      "job_type": ["full-time", "contract", "internship"],
+      "experience_level": "entry-mid",
+      "posted_within": "week",
+      "max_results": 50
+    },
+
+    {
+      "category": "GIS Data Analyst",
+      "keywords": [
+        "GIS Analyst",
+        "Geospatial Data Analyst",
+        "Spatial Data Engineer",
+        "GIS Developer",
+        "Remote Sensing Analyst",
+        "Environmental Data Scientist"
+      ],
+      "skills": [
+        "ArcGIS Online",
+        "PostGIS",
+        "Python",
+        "SQL",
+        "Power BI",
+        "Spatial SQL",
+        "Predictive Modeling",
+        "Data Cleaning",
+        "Map Visualization",
+        "Geoprocessing",
+        "Spatial Data Analysis",
+        "NLP (Text from Field Notes)"
+      ],
+      "location": "United States",
+      "remote_ok": true,
+      "job_type": ["full-time", "contract", "internship"],
+      "experience_level": "mid-level",
+      "posted_within": "week",
+      "max_results": 50
+    }
+  ],
+
+  "default_settings": {
+    "enable_matching": true,
+    "save_to_sheets": true,
+    "min_match_threshold": 60,
+    "search_delay_seconds": 5
+  }
+}

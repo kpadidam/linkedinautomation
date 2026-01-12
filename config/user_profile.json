@@ -1,0 +1,313 @@
+{
+  "name": "Sarah Mitchell",
+  "title": "Senior Data Analyst",
+  "years_of_experience": 5,
+  "resume_file": "resume.pdf",
+  "email": "sarah.mitchell@example.com",
+  "phone": "+1 (555) 123-4567",
+  "location": "San Francisco, CA",
+  "linkedin_url": "https://www.linkedin.com/in/sarahmitchell",
+  "portfolio_url": "https://www.sarahmitchell.dev",
+
+  "summary": "Results-driven Data Analyst with 5+ years of experience in transforming complex datasets into actionable business insights. Expertise in data visualization, statistical analysis, and building scalable ETL pipelines. Proven track record of delivering data-driven solutions that drive business growth and operational efficiency.",
+
+  "skills": {
+    "programming_languages": [
+      {"name": "Python", "level": "Expert", "years": 5},
+      {"name": "SQL", "level": "Expert", "years": 5},
+      {"name": "R", "level": "Advanced", "years": 3},
+      {"name": "JavaScript", "level": "Intermediate", "years": 2},
+      {"name": "Java", "level": "Beginner", "years": 1}
+    ],
+
+    "analytics_bi_tools": [
+      {"name": "Tableau", "level": "Expert", "years": 5},
+      {"name": "Power BI", "level": "Expert", "years": 4},
+      {"name": "Looker", "level": "Advanced", "years": 3},
+      {"name": "Excel (Advanced Analytics)", "level": "Expert", "years": 6},
+      {"name": "Google Analytics", "level": "Advanced", "years": 4},
+      {"name": "Metabase", "level": "Intermediate", "years": 2},
+      {"name": "QlikView", "level": "Intermediate", "years": 2}
+    ],
+
+    "data_engineering_tools": [
+      {"name": "Apache Airflow", "level": "Advanced", "years": 3},
+      {"name": "Apache Spark", "level": "Advanced", "years": 3},
+      {"name": "Databricks", "level": "Advanced", "years": 3},
+      {"name": "dbt (Data Build Tool)", "level": "Advanced", "years": 2},
+      {"name": "Azure Data Factory", "level": "Intermediate", "years": 2},
+      {"name": "AWS Glue", "level": "Intermediate", "years": 2},
+      {"name": "Kafka", "level": "Beginner", "years": 1},
+      {"name": "Snowflake", "level": "Advanced", "years": 3}
+    ],
+
+    "databases": [
+      {"name": "PostgreSQL", "level": "Expert", "years": 5},
+      {"name": "MySQL", "level": "Expert", "years": 5},
+      {"name": "MongoDB", "level": "Advanced", "years": 3},
+      {"name": "Redshift", "level": "Advanced", "years": 3},
+      {"name": "BigQuery", "level": "Advanced", "years": 3},
+      {"name": "Oracle", "level": "Intermediate", "years": 2},
+      {"name": "Cassandra", "level": "Beginner", "years": 1}
+    ],
+
+    "cloud_platforms": [
+      {"name": "AWS", "level": "Advanced", "years": 4},
+      {"name": "AWS S3", "level": "Expert", "years": 4},
+      {"name": "AWS Lambda", "level": "Advanced", "years": 3},
+      {"name": "AWS Redshift", "level": "Advanced", "years": 3},
+      {"name": "AWS EC2", "level": "Intermediate", "years": 3},
+      {"name": "Google Cloud Platform (GCP)", "level": "Advanced", "years": 3},
+      {"name": "Azure", "level": "Intermediate", "years": 2},
+      {"name": "Azure Synapse", "level": "Intermediate", "years": 2}
+    ],
+
+    "statistical_modeling_ml": [
+      {"name": "Scikit-learn", "level": "Advanced", "years": 4},
+      {"name": "Pandas", "level": "Expert", "years": 5},
+      {"name": "NumPy", "level": "Expert", "years": 5},
+      {"name": "SciPy", "level": "Advanced", "years": 4},
+      {"name": "TensorFlow", "level": "Intermediate", "years": 2},
+      {"name": "PyTorch", "level": "Intermediate", "years": 2},
+      {"name": "XGBoost", "level": "Advanced", "years": 3},
+      {"name": "Time Series Analysis", "level": "Advanced", "years": 3},
+      {"name": "A/B Testing", "level": "Expert", "years": 4},
+      {"name": "Regression Analysis", "level": "Expert", "years": 5},
+      {"name": "Statistical Inference", "level": "Advanced", "years": 4}
+    ],
+
+    "data_visualization": [
+      {"name": "Matplotlib", "level": "Advanced", "years": 4},
+      {"name": "Seaborn", "level": "Advanced", "years": 4},
+      {"name": "Plotly", "level": "Advanced", "years": 3},
+      {"name": "D3.js", "level": "Intermediate", "years": 2},
+      {"name": "Altair", "level": "Intermediate", "years": 2}
+    ],
+
+    "versioning_work_methods": [
+      {"name": "Git/GitHub", "level": "Expert", "years": 5},
+      {"name": "GitLab", "level": "Advanced", "years": 3},
+      {"name": "Agile/Scrum", "level": "Expert", "years": 5},
+      {"name": "JIRA", "level": "Advanced", "years": 4},
+      {"name": "Confluence", "level": "Advanced", "years": 4},
+      {"name": "CI/CD (Jenkins, GitHub Actions)", "level": "Intermediate", "years": 2}
+    ],
+
+    "other_technical_skills": [
+      {"name": "Docker", "level": "Intermediate", "years": 2},
+      {"name": "Kubernetes", "level": "Beginner", "years": 1},
+      {"name": "REST APIs", "level": "Advanced", "years": 4},
+      {"name": "Web Scraping (BeautifulSoup, Scrapy)", "level": "Advanced", "years": 3},
+      {"name": "Jupyter Notebooks", "level": "Expert", "years": 5}
+    ]
+  },
+
+  "certifications": [
+    "AWS Certified Data Analytics - Specialty",
+    "Google Professional Data Engineer",
+    "Tableau Desktop Specialist",
+    "Microsoft Certified: Azure Data Scientist Associate",
+    "Databricks Certified Associate Developer for Apache Spark",
+    "Six Sigma Green Belt"
+  ],
+
+  "work_experience": [
+    {
+      "company": "TechVision Analytics Inc.",
+      "location": "San Francisco, CA",
+      "position": "Senior Data Analyst",
+      "duration": "Jan 2023 – Present",
+      "responsibilities": [
+        "Lead a team of 3 junior analysts in developing end-to-end analytics solutions",
+        "Design and implement data pipelines processing 10M+ records daily using Apache Airflow and Spark",
+        "Create executive dashboards in Tableau that improved decision-making speed by 40%",
+        "Conduct advanced statistical analyses and A/B tests to optimize product features",
+        "Collaborate with product managers and engineers to define KPIs and tracking requirements"
+      ],
+      "key_technologies": ["Python", "SQL", "Tableau", "Apache Spark", "AWS Redshift", "dbt", "Airflow", "BigQuery"],
+      "achievements": [
+        "Reduced data processing time by 60% through pipeline optimization",
+        "Developed predictive models that increased customer retention by 25%",
+        "Led migration of legacy reporting system to modern cloud-based infrastructure"
+      ]
+    },
+    {
+      "company": "DataFlow Solutions",
+      "location": "Seattle, WA",
+      "position": "Data Analyst",
+      "duration": "Mar 2021 – Dec 2022",
+      "responsibilities": [
+        "Built and maintained ETL pipelines using Python, SQL, and Azure Data Factory",
+        "Created interactive dashboards and reports in Power BI for stakeholder consumption",
+        "Performed exploratory data analysis to identify trends and business opportunities",
+        "Automated manual reporting processes, saving 20+ hours per week",
+        "Collaborated with cross-functional teams to deliver data-driven recommendations"
+      ],
+      "key_technologies": ["Python", "SQL", "Power BI", "Azure Data Factory", "PostgreSQL", "Pandas", "Excel"],
+      "achievements": [
+        "Implemented automated anomaly detection system that identified $500K in revenue leakage",
+        "Reduced report generation time from 2 days to 2 hours through automation",
+        "Presented insights to C-level executives that influenced strategic decisions"
+      ]
+    },
+    {
+      "company": "Insight Analytics Corp",
+      "location": "Austin, TX",
+      "position": "Junior Data Analyst",
+      "duration": "Jun 2019 – Feb 2021",
+      "responsibilities": [
+        "Collected, cleaned, and analyzed data from multiple sources",
+        "Created visualizations and reports to communicate findings to stakeholders",
+        "Assisted in development of forecasting models for sales prediction",
+        "Maintained data quality and integrity across analytical databases",
+        "Supported senior analysts in ad-hoc analysis and special projects"
+      ],
+      "key_technologies": ["SQL", "Excel", "Tableau", "Python", "MySQL", "Google Analytics"],
+      "achievements": [
+        "Identified data quality issues that improved reporting accuracy by 35%",
+        "Developed customer segmentation model that increased marketing ROI by 18%",
+        "Earned 'Rising Star' award for exceptional contributions in first year"
+      ]
+    }
+  ],
+
+  "preferred_roles": [
+    "Senior Data Analyst",
+    "Lead Data Analyst",
+    "Data Scientist",
+    "Analytics Engineer",
+    "Business Intelligence Manager",
+    "Data Engineering (Analytics focused)"
+  ],
+
+  "education": [
+    {
+      "degree": "Master of Science in Data Science",
+      "institution": "Stanford University",
+      "location": "Stanford, CA",
+      "gpa": "3.85/4.0",
+      "year_completed": "2019",
+      "relevant_coursework": [
+        "Machine Learning",
+        "Statistical Inference",
+        "Data Mining",
+        "Big Data Analytics",
+        "Database Systems"
+      ]
+    },
+    {
+      "degree": "Bachelor of Science in Mathematics",
+      "institution": "University of California, Berkeley",
+      "location": "Berkeley, CA",
+      "gpa": "3.72/4.0",
+      "year_completed": "2017",
+      "minor": "Computer Science",
+      "honors": "Magna Cum Laude"
+    }
+  ],
+
+  "projects": [
+    {
+      "name": "Real-Time Customer Analytics Platform",
+      "description": "Built a real-time analytics platform for monitoring customer behavior and engagement metrics across web and mobile applications.",
+      "tools_used": ["Python", "Apache Kafka", "Spark Streaming", "PostgreSQL", "Redis", "Tableau", "AWS"],
+      "highlights": [
+        "Processed 100K+ events per second with sub-second latency",
+        "Designed scalable architecture handling 50M daily active users",
+        "Created real-time dashboards for business stakeholders",
+        "Implemented machine learning models for customer churn prediction"
+      ],
+      "impact": "Enabled marketing team to respond to customer behavior in real-time, increasing conversion rates by 22%"
+    },
+    {
+      "name": "E-commerce Sales Forecasting System",
+      "description": "Developed time series forecasting models to predict product demand and optimize inventory management.",
+      "tools_used": ["Python", "Scikit-learn", "Prophet", "XGBoost", "SQL", "Jupyter", "Power BI"],
+      "highlights": [
+        "Built ensemble models combining ARIMA, Prophet, and gradient boosting",
+        "Achieved 92% forecast accuracy for 30-day predictions",
+        "Created automated pipeline for model retraining and deployment",
+        "Designed interactive dashboard for business users"
+      ],
+      "impact": "Reduced inventory costs by 15% and stockouts by 30%"
+    },
+    {
+      "name": "Customer Segmentation and Personalization Engine",
+      "description": "Implemented unsupervised learning algorithms to segment customers and enable personalized marketing campaigns.",
+      "tools_used": ["Python", "K-means", "DBSCAN", "PCA", "BigQuery", "Looker", "dbt"],
+      "highlights": [
+        "Analyzed 5M+ customer records to identify distinct segments",
+        "Used dimensionality reduction to visualize customer clusters",
+        "Developed automated segmentation pipeline running weekly",
+        "Created segment profiles and targeting recommendations"
+      ],
+      "impact": "Improved email campaign CTR by 45% and conversion rate by 28%"
+    }
+  ],
+
+  "publications_and_talks": [
+    {
+      "title": "Building Scalable Analytics Pipelines with Modern Data Stack",
+      "type": "Conference Talk",
+      "venue": "Data Engineering Summit 2024",
+      "date": "Oct 2024"
+    },
+    {
+      "title": "A/B Testing Best Practices for Product Teams",
+      "type": "Blog Post",
+      "venue": "Medium",
+      "date": "Jun 2024",
+      "url": "https://medium.com/mock-article"
+    }
+  ],
+
+  "awards_and_recognition": [
+    "Data Analyst of the Year - TechVision Analytics (2024)",
+    "Innovation Award for Analytics Excellence (2023)",
+    "Rising Star Award - Insight Analytics Corp (2020)"
+  ],
+
+  "professional_memberships": [
+    "Association for Computing Machinery (ACM)",
+    "International Institute for Analytics (IIA)",
+    "Women in Data Science"
+  ],
+
+  "languages": [
+    {"language": "English", "proficiency": "Native"},
+    {"language": "Spanish", "proficiency": "Professional Working"},
+    {"language": "French", "proficiency": "Elementary"}
+  ],
+
+  "soft_skills": [
+    "Leadership and Team Management",
+    "Strategic Thinking",
+    "Stakeholder Communication",
+    "Problem Solving",
+    "Data Storytelling",
+    "Cross-functional Collaboration",
+    "Mentoring and Training",
+    "Project Management"
+  ],
+
+  "interests": [
+    "Open Source Contributions",
+    "Data Visualization Design",
+    "Machine Learning Research",
+    "Teaching and Mentoring",
+    "Tech Community Building"
+  ],
+
+  "all_skills_list": [
+    "Python", "SQL", "R", "JavaScript", "Java",
+    "Tableau", "Power BI", "Looker", "Excel", "Google Analytics", "Metabase", "QlikView",
+    "Apache Airflow", "Apache Spark", "Databricks", "dbt", "Azure Data Factory", "AWS Glue", "Kafka", "Snowflake",
+    "PostgreSQL", "MySQL", "MongoDB", "Redshift", "BigQuery", "Oracle", "Cassandra",
+    "AWS", "AWS S3", "AWS Lambda", "AWS Redshift", "AWS EC2", "Google Cloud Platform", "Azure", "Azure Synapse",
+    "Scikit-learn", "Pandas", "NumPy", "SciPy", "TensorFlow", "PyTorch", "XGBoost",
+    "Time Series Analysis", "A/B Testing", "Regression Analysis", "Statistical Inference",
+    "Matplotlib", "Seaborn", "Plotly", "D3.js", "Altair",
+    "Git", "GitHub", "GitLab", "Agile", "Scrum", "JIRA", "Confluence", "CI/CD",
+    "Docker", "Kubernetes", "REST APIs", "Web Scraping", "Jupyter Notebooks"
+  ]
+}

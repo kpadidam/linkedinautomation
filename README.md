@@ -120,27 +120,38 @@ Run the LinkedIn scraper directly:
 python linkedin_scraper.py
 ```
 
+The scraper will:
+1. Load your profile and job preferences from `config/`
+2. Search LinkedIn for matching jobs using Playwright
+3. Match each job against your resume using AI
+4. Log all results to your Google Sheet with match scores
+
  📁 Project Structure
 
 ```
 linkedin-job-automation/
 ├── config/
-│   ├── user_profile.json    # Your profile and skills
-│   ├── job_preferences.json # Job search criteria
-│   └── credentials.json     # Google Sheets service account
+│   ├── credentials.json         # Google Sheets service account
+│   ├── job_preferences.json     # Job search criteria
+│   └── user_profile.json        # Your profile and skills
 ├── resumes/
-│   └── resume.pdf           # Your resume
-├── app/
-│   └── main.py             # FastAPI application
+│   └── resume.pdf               # Your resume
 ├── scrapers/
-│   └── linkedin_scraper_playwright.py
+│   ├── __init__.py
+│   ├── linkedin_scraper_playwright.py  # Main Playwright scraper
+│   └── linkedin_scraper_v2.py          # Alternative scraper implementation
 ├── services/
-│   ├── google_sheets_service.py
-│   └── resume_matcher.py
-├── database/
-│   └── models.py
-├── .env                     # Your environment variables
-└── requirements.txt
+│   ├── google_sheets_service.py # Google Sheets integration
+│   └── resume_matcher.py        # AI-powered job matching
+├── models/
+│   └── job_model.py             # Job data models
+├── app/
+│   └── main.py                  # FastAPI web dashboard
+├── linkedin_scraper.py          # Main entry point script
+├── config.py                    # Configuration management
+├── .env                         # Your environment variables
+├── .gitignore                   # Git ignore rules
+└── requirements.txt             # Python dependencies
 ```
 
  🔧 Configuration Guide

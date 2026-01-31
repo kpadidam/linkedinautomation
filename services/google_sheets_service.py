@@ -211,7 +211,7 @@ class GoogleSheetsService:
             
             self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
-                range='A:O',
+                range='A:P',
                 valueInputOption='RAW',
                 insertDataOption='INSERT_ROWS',
                 body=body
@@ -249,7 +249,7 @@ class GoogleSheetsService:
             
             self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
-                range='A:O',
+                range='A:P',
                 valueInputOption='RAW',
                 insertDataOption='INSERT_ROWS',
                 body=body

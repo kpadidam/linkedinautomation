@@ -139,32 +139,60 @@ class LinkedInScraperPlaywright:
     async def search_and_extract_jobs(self, params: JobSearchParams) -> List[Dict[str, Any]]:
         """
         Search for jobs using the search bar and extract with URL manipulation.
-        
+
         Steps:
         1. Use search bar to search for role
         2. Click Jobs radio button
         3. Apply Date Posted filter (Past 24 hours)
         4. Modify URL from r86400 to r3600
         5. Extract jobs with links
-        
+
         Args:
             params: Search parameters
-            
+
         Returns:
             List of job dictionaries with match scores
         """
         try:
             logger.info(f"Searching for: {params.keywords}")
-            
-            # Step 1: Use the search bar
+
+            # Navigate to LinkedIn jobs page first to ensure search bar is available
+            logger.info("Navigating to LinkedIn jobs page...")
+            await self.page.goto("https://www.linkedin.com/jobs/", wait_until='domcontentloaded', timeout=15000)
+            await asyncio.sleep(3)
+
+            # Step 1: Use the search bar - try multiple selectors
             logger.info("Looking for search bar...")
-            search_bar = await self.page.wait_for_selector(
-                'input[placeholder*="Search"], input[aria-label*="Search"]', 
-                timeout=10000
-            )
+            search_bar = None
+            search_bar_selectors = [
+                'input[aria-label="Search by title, skill, or company"]',
+                'input[placeholder*="Search by title"]',
+                'input.jobs-search-box__text-input',
+                'input[id*="jobs-search-box-keyword"]',
+                'input[aria-label*="Search"]',
+                'input[placeholder*="Search"]',
+                'input.search-global-typeahead__input',
+                'input[type="text"][role="combobox"]'
+            ]
+
+            for selector in search_bar_selectors:
+                try:
+                    search_bar = await self.page.wait_for_selector(selector, timeout=5000)
+                    if search_bar:
+                        logger.info(f"Found search bar using selector: {selector}")
+                        break
+                except:
+                    continue
+
+            if not search_bar:
+                # Take screenshot for debugging
+                await self.page.screenshot(path="debug_search_bar_not_found.png")
+                logger.error("Could not find search bar with any selector. Screenshot saved.")
+                raise Exception("Search bar not found on LinkedIn jobs page")
+
             await search_bar.fill(params.keywords)
             await search_bar.press('Enter')
-            
+
             await asyncio.sleep(3)
             
             # Step 2: Navigate to Jobs section
@@ -338,11 +366,30 @@ class LinkedInScraperPlaywright:
                 # Log to Google Sheets if available
                 if self.google_sheets and "resume_match_score" in job:
                     try:
+                        # DEBUG: Log what fields we're passing to JobListing
+                        logger.debug(f"Creating JobListing with fields: job_id={job.get('job_id')}, "
+                                   f"job_type={job.get('job_type')}, "
+                                   f"experience_level={job.get('experience_level')}, "
+                                   f"level={job.get('level')}, "
+                                   f"applicants_count={job.get('applicants_count')}, "
+                                   f"skills_count={len(job.get('skills', []))}, "
+                                   f"responsibilities_count={len(job.get('responsibilities', []))}")
+
                         job_listing = JobListing(**job)
+
+                        # DEBUG: Log what the JobListing object actually has
+                        logger.debug(f"JobListing created: job_id={job_listing.job_id}, "
+                                   f"job_type={job_listing.job_type}, "
+                                   f"experience_level={job_listing.experience_level}, "
+                                   f"level={job_listing.level}, "
+                                   f"applicants_count={job_listing.applicants_count}")
+
                         self.google_sheets.add_job(job_listing)
-                        logger.info(f"Added job to Google Sheets: {job['title']}")
+                        logger.info(f"✓ Added job to Google Sheets: {job['title']}")
                     except Exception as e:
-                        logger.warning(f"Could not add to Google Sheets: {e}")
+                        logger.error(f"❌ Could not add to Google Sheets: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
             
             # Limit to max_results
             jobs = jobs[:params.max_results]
@@ -358,8 +405,19 @@ class LinkedInScraperPlaywright:
     async def _extract_job_details_from_panel(self) -> Dict[str, Any]:
         """Extract full job details from the opened detail panel."""
         details = {}
-        
+
         try:
+            logger.info("=" * 60)
+            logger.info("PHASE 2 DETAIL EXTRACTION - START")
+            logger.info("=" * 60)
+
+            # First, wait a bit longer for panel to fully load
+            logger.info("Waiting 3 seconds for panel to load...")
+            await asyncio.sleep(3)
+
+            # Log current page structure for debugging
+            logger.info(f"Current URL: {self.page.url}")
+
             # MORE COMPREHENSIVE selectors for LinkedIn 2024/2025
             desc_selectors = [
                 # Most common current selectors
@@ -368,40 +426,56 @@ class LinkedInScraperPlaywright:
                 'section[class*="jobs-description"]',
                 'div.jobs-unified-description__content',
                 'div#job-details',
-                
+
                 # Try broader selectors
                 'article[class*="jobs"]',
                 'div[class*="description-content"]',
                 '[data-job-description]',
-                
+
                 # Very broad but specific to job content
                 'div.scaffold-layout__detail',
                 'div.jobs-search__job-details',
                 'div.jobs-view-layout',
-                
+
                 # Legacy selectors
                 '.jobs-description-content',
                 '.details-pane__content'
             ]
-            
-            # First, wait a bit longer for panel to fully load
-            await asyncio.sleep(2)
-            
+
             # Try to find ANY job detail element
             panel_loaded = False
+            matched_selector = None
             for selector in desc_selectors:
                 try:
                     elem = await self.page.query_selector(selector)
                     if elem:
                         panel_loaded = True
-                        logger.info(f"Found panel element with selector: {selector}")
+                        matched_selector = selector
+                        logger.info(f"✓ Found panel element with selector: {selector}")
                         break
-                except:
+                    else:
+                        logger.debug(f"✗ Selector '{selector}' returned None")
+                except Exception as e:
+                    logger.debug(f"✗ Selector '{selector}' failed: {e}")
                     continue
-            
+
             if not panel_loaded:
-                logger.warning("No detail panel found! Taking debug screenshot...")
-                await self.page.screenshot(path=f"debug_no_panel_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+                logger.error("❌ NO DETAIL PANEL FOUND WITH ANY SELECTOR!")
+                screenshot_path = f"debug_no_panel_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                await self.page.screenshot(path=screenshot_path)
+                logger.error(f"Saved screenshot to: {screenshot_path}")
+
+                # Log page HTML structure for debugging
+                try:
+                    page_html = await self.page.content()
+                    html_file = f"debug_page_html_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                    with open(html_file, 'w', encoding='utf-8') as f:
+                        f.write(page_html)
+                    logger.error(f"Saved page HTML to: {html_file}")
+                except:
+                    pass
+
+                return details
                 
                 # Try to get ANY text from the right side of the page
                 try:
@@ -413,6 +487,7 @@ class LinkedInScraperPlaywright:
                     pass
             
             # Extract full description - try ALL selectors
+            logger.info("Attempting to extract job description...")
             full_description = ""
             for selector in desc_selectors:
                 try:
@@ -421,9 +496,12 @@ class LinkedInScraperPlaywright:
                         text = await desc_elem.inner_text()
                         if text and len(text) > 100:  # Meaningful content
                             full_description = text
-                            logger.info(f"✓ Found description using selector: {selector} (length: {len(text)})")
+                            logger.info(f"✓ Found description using selector: {selector} (length: {len(text)} chars)")
                             break
-                except:
+                        else:
+                            logger.debug(f"Selector '{selector}' found element but text too short: {len(text) if text else 0} chars")
+                except Exception as e:
+                    logger.debug(f"Error with selector '{selector}': {e}")
                     continue
             
             # If still no description, try to get text from the entire right panel
@@ -439,22 +517,34 @@ class LinkedInScraperPlaywright:
                     pass
             
             if full_description:
+                logger.info(f"Processing description ({len(full_description)} chars)...")
+
                 # Parse responsibilities
-                details['responsibilities'] = self._parse_responsibilities(full_description)
-                
+                responsibilities = self._parse_responsibilities(full_description)
+                details['responsibilities'] = responsibilities
+                logger.info(f"✓ Extracted {len(responsibilities)} responsibilities")
+
                 # Parse requirements and determine experience level
                 requirements, exp_level, years_num = self._parse_requirements_and_experience(full_description)
                 details['requirements'] = requirements
+                logger.info(f"✓ Extracted {len(requirements)} requirements")
+
                 if exp_level:
                     details['experience_level'] = exp_level
+                    logger.info(f"✓ Experience level: {exp_level}")
                 if years_num is not None:
                     details['level'] = years_num
-                
+                    logger.info(f"✓ Years of experience: {years_num}")
+
                 # Extract skills from full description
-                details['skills'] = self._extract_skills_from_full_description(full_description)
-                
+                skills = self._extract_skills_from_full_description(full_description)
+                details['skills'] = skills
+                logger.info(f"✓ Extracted {len(skills)} skills: {skills[:5] if len(skills) > 5 else skills}")
+
                 # Store full description
                 details['description'] = full_description[:500] + "..." if len(full_description) > 500 else full_description
+            else:
+                logger.warning("❌ No description text found - cannot extract responsibilities, requirements, skills")
             
             # Try to extract skills from skill badges/tags if present
             skill_badges = await self.page.query_selector_all(
@@ -468,10 +558,90 @@ class LinkedInScraperPlaywright:
                         badge_skills.append(skill_text.strip())
                 except:
                     pass
-            
+
             if badge_skills:
                 existing_skills = details.get('skills', [])
                 details['skills'] = list(set(existing_skills + badge_skills))[:15]
+
+            # FIX 3: Also try to extract job_type, applicants, and posted from detail panel
+            logger.info("Attempting to extract job_type, applicants, posted from detail panel...")
+
+            # Try to extract job type from detail panel
+            try:
+                job_type_selectors = [
+                    '.jobs-unified-top-card__job-insight span:has-text("Full-time")',
+                    '.jobs-unified-top-card__job-insight span:has-text("Part-time")',
+                    '.jobs-unified-top-card__job-insight span:has-text("Contract")',
+                    '.jobs-unified-top-card__job-insight',
+                    '.job-details-jobs-unified-top-card__job-insight'
+                ]
+                for selector in job_type_selectors:
+                    elem = await self.page.query_selector(selector)
+                    if elem:
+                        text = await elem.inner_text()
+                        if text:
+                            # Normalize text to match JobType enum values
+                            text_lower = text.lower()
+
+                            # Extract just the job type, ignoring extra text like "· Mid-Senior level"
+                            normalized_type = None
+                            if 'full-time' in text_lower or 'full time' in text_lower:
+                                normalized_type = 'full-time'
+                            elif 'part-time' in text_lower or 'part time' in text_lower:
+                                normalized_type = 'part-time'
+                            elif 'contract' in text_lower:
+                                normalized_type = 'contract'
+                            elif 'temporary' in text_lower or 'temp' in text_lower:
+                                normalized_type = 'temporary'
+                            elif 'internship' in text_lower or 'intern' in text_lower:
+                                normalized_type = 'internship'
+                            elif 'volunteer' in text_lower:
+                                normalized_type = 'volunteer'
+
+                            if normalized_type:
+                                details['job_type'] = normalized_type
+                                logger.info(f"✓ Found job_type from panel: '{text}' → normalized to '{normalized_type}'")
+                                break
+            except Exception as e:
+                logger.debug(f"Could not extract job_type from panel: {e}")
+
+            # Try to extract applicants count from detail panel
+            try:
+                applicants_selectors = [
+                    'span:has-text("applicant")',
+                    'span:has-text("applicants")',
+                    '.jobs-unified-top-card__applicant-count',
+                    'figcaption:has-text("applicant")'
+                ]
+                for selector in applicants_selectors:
+                    elem = await self.page.query_selector(selector)
+                    if elem:
+                        text = await elem.inner_text()
+                        if text and 'applicant' in text.lower():
+                            details['applicants_count'] = text.strip()
+                            logger.info(f"✓ Found applicants from panel: {details['applicants_count']}")
+                            break
+            except Exception as e:
+                logger.debug(f"Could not extract applicants from panel: {e}")
+
+            # Try to extract posted date from detail panel
+            try:
+                posted_selectors = [
+                    '.jobs-unified-top-card__posted-date',
+                    'span:has-text("ago")',
+                    'span.tvm__text:has-text("ago")',
+                    '.job-details-jobs-unified-top-card__posted-date'
+                ]
+                for selector in posted_selectors:
+                    elem = await self.page.query_selector(selector)
+                    if elem:
+                        text = await elem.inner_text()
+                        if text and ('ago' in text.lower() or 'posted' in text.lower()):
+                            details['posted_date'] = text.strip()
+                            logger.info(f"✓ Found posted date from panel: {details['posted_date']}")
+                            break
+            except Exception as e:
+                logger.debug(f"Could not extract posted date from panel: {e}")
             
             # Debug if no description found
             if not full_description or len(full_description) < 100:
@@ -480,8 +650,21 @@ class LinkedInScraperPlaywright:
                 await self.page.screenshot(path=f"debug_no_description_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
                 
         except Exception as e:
-            logger.debug(f"Could not extract full details from panel: {e}")
-            
+            logger.error(f"Exception in _extract_job_details_from_panel: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        # Log summary of what was extracted
+        logger.info("=" * 60)
+        logger.info("PHASE 2 DETAIL EXTRACTION - SUMMARY")
+        logger.info(f"Description length: {len(details.get('description', ''))}")
+        logger.info(f"Responsibilities: {len(details.get('responsibilities', []))}")
+        logger.info(f"Requirements: {len(details.get('requirements', []))}")
+        logger.info(f"Skills: {len(details.get('skills', []))}")
+        logger.info(f"Experience level: {details.get('experience_level', 'N/A')}")
+        logger.info(f"Years: {details.get('level', 'N/A')}")
+        logger.info("=" * 60)
+
         return details
     
     def _parse_responsibilities(self, description: str) -> List[str]:
@@ -599,13 +782,14 @@ class LinkedInScraperPlaywright:
                         break
         
         # Look for degree requirements
+        desc_lower = description.lower()  # FIX: Define desc_lower before using it
         if 'bachelor' in desc_lower or 'bs ' in desc_lower or 'ba ' in desc_lower:
             if not any('bachelor' in req.lower() for req in requirements):
                 requirements.append("Bachelor's degree required")
         elif 'master' in desc_lower or 'ms ' in desc_lower or 'mba' in desc_lower:
             if not any('master' in req.lower() for req in requirements):
                 requirements.append("Master's degree preferred")
-                
+
         return requirements[:5], exp_level, years_num
     
     def _extract_skills_from_full_description(self, description: str) -> List[str]:
@@ -641,7 +825,7 @@ class LinkedInScraperPlaywright:
     async def _extract_jobs_with_details(self) -> List[Dict[str, Any]]:
         """Extract job listings with all details including links."""
         jobs = []
-        
+
         try:
             # Wait for job cards to load with shorter timeout
             try:
@@ -651,13 +835,13 @@ class LinkedInScraperPlaywright:
                 )
             except:
                 logger.warning("Timeout waiting for job cards, checking if any exist...")
-            
+
             # Human-like scrolling to trigger lazy loading
             await self.page.mouse.wheel(0, random.randint(200, 400))
             await asyncio.sleep(random.uniform(1, 2))
             await self.page.mouse.wheel(0, random.randint(200, 400))
             await asyncio.sleep(random.uniform(0.5, 1.5))
-            
+
             # Try different selectors for job cards - updated for current LinkedIn
             job_card_selectors = [
                 '.job-search-card',  # Current LinkedIn primary selector
@@ -666,28 +850,43 @@ class LinkedInScraperPlaywright:
                 'div[data-job-id]',
                 'li[data-occludable-job-id]'
             ]
-            
+
             job_cards = []
+            working_selector = None  # Track which selector actually works
             for selector in job_card_selectors:
                 cards = await self.page.query_selector_all(selector)
                 if cards:
                     job_cards = cards
+                    working_selector = selector  # Save the selector that worked
                     logger.info(f"Found {len(cards)} job cards using selector: {selector}")
                     break
-            
+
             if not job_cards:
                 logger.warning("No job cards found on page")
                 return jobs
+
+            # PHASE 1: Extract all basic job data WITHOUT clicking (to avoid context destruction)
+            logger.info("Phase 1: Extracting basic info from all job cards...")
+            jobs_basic_data = []
             
             for i, card in enumerate(job_cards):
                 try:
                     job_data = {}
-                    
+
+                    # Store the card HTML as text to avoid element reference issues
+                    try:
+                        card_html = await card.inner_html()
+                    except:
+                        card_html = ""
+
                     # Extract job ID
-                    job_id = await card.get_attribute('data-job-id')
-                    if not job_id:
-                        job_id = await card.get_attribute('data-occludable-job-id')
-                    job_data["job_id"] = job_id or f"job_{i}"
+                    try:
+                        job_id = await card.get_attribute('data-job-id')
+                        if not job_id:
+                            job_id = await card.get_attribute('data-occludable-job-id')
+                        job_data["job_id"] = job_id or f"job_{i}"
+                    except:
+                        job_data["job_id"] = f"job_{i}"
                     
                     # Extract title - simplified for current LinkedIn structure
                     title = ""
@@ -739,10 +938,9 @@ class LinkedInScraperPlaywright:
                             pass
                     job_data["url"] = url
                     
-                    # Extract company - two-stage approach with stealth mode
+                    # Extract company - from job card only (no clicking to avoid context issues)
                     company = ""
-                    
-                    # Stage 1: Try extracting from job card
+
                     card_selectors = [
                         'a[class*="subtitle"]',
                         'span[class*="subtitle"]',
@@ -753,64 +951,21 @@ class LinkedInScraperPlaywright:
                         'h4.job-card-container__company-name',
                         'span.job-card-container__primary-description'
                     ]
-                    
+
                     for selector in card_selectors:
-                        elem = await card.query_selector(selector)
-                        if elem:
-                            try:
+                        try:
+                            elem = await card.query_selector(selector)
+                            if elem:
                                 text = await elem.inner_text()
                                 text = text.strip()
                                 # Validate it's likely a company name
                                 if text and len(text) > 2 and not any(skip in text.lower() for skip in ['remote', 'ago', 'applicant', 'hybrid', 'on-site']):
                                     company = text
                                     break
-                            except:
-                                pass
-                    
-                    # Stage 2: If no company found, click job to open details panel
-                    if not company or company == "Unknown Company":
-                        try:
-                            # Add human-like delay
-                            await asyncio.sleep(random.uniform(0.5, 1.5))
-                            
-                            # Click the job card to open details
-                            await card.click()
-                            
-                            # Wait for details panel to load
-                            await self.page.wait_for_selector(
-                                '.jobs-unified-top-card__company-name, .top-card-layout__company-url, .jobs-view-top-card__company',
-                                timeout=3000
-                            )
-                            
-                            # Extract from detail panel (more reliable)
-                            detail_selectors = [
-                                '.jobs-unified-top-card__company-name a',
-                                '.top-card-layout__company-url',
-                                '.jobs-view-top-card__company',
-                                '.jobs-unified-top-card__subtitle-primary-grouping span',
-                                'a[href*="/company/"]'
-                            ]
-                            
-                            for selector in detail_selectors:
-                                elem = await self.page.query_selector(selector)
-                                if elem:
-                                    try:
-                                        text = await elem.inner_text()
-                                        text = text.strip()
-                                        if text and len(text) > 2:
-                                            company = text
-                                            break
-                                    except:
-                                        pass
-                            
-                            # Close detail panel (ESC key) to return to list
-                            await self.page.keyboard.press('Escape')
-                            await asyncio.sleep(0.5)
-                            
-                        except Exception as e:
-                            logger.debug(f"Failed to extract from details panel: {e}")
-                    
-                    # Final fallback: extract from aria-label
+                        except:
+                            pass
+
+                    # Fallback: extract from aria-label
                     if not company:
                         try:
                             aria_label = await card.get_attribute('aria-label')
@@ -822,19 +977,7 @@ class LinkedInScraperPlaywright:
                                     company = company_part.strip()
                         except:
                             pass
-                    
-                    # Debug logging if still no company found
-                    if not company or company == "Unknown Company":
-                        logger.warning(f"Failed to extract company for job {i}")
-                        # Save HTML for debugging
-                        try:
-                            card_html = await card.inner_html()
-                            with open(f"debug_card_{i}.html", 'w') as f:
-                                f.write(card_html)
-                            await card.screenshot(path=f"debug_company_card_{i}.png")
-                        except:
-                            pass
-                    
+
                     job_data["company"] = company or "Unknown Company"
                     
                     # Extract location - with fallback
@@ -878,6 +1021,9 @@ class LinkedInScraperPlaywright:
                             except:
                                 continue
                     job_data["applicants_count"] = applicants
+
+                    # DEBUG: Log applicants extraction
+                    logger.debug(f"[Card {i}] applicants_count: {applicants}")
                     
                     # Extract salary if available
                     salary = ""
@@ -997,26 +1143,47 @@ class LinkedInScraperPlaywright:
                     # Set to None if not found (not empty string)
                     job_data["job_type"] = job_type
                     job_data["experience_level"] = exp_level
+
+                    # DEBUG: Log what we extracted
+                    logger.debug(f"[Card {i}] job_type: {job_type}, experience_level: {exp_level}")
                     
                     # Extract skills from description and title if available
                     skills = []
-                    # Expanded skill list based on user's job search categories
+                    # Comprehensive skill list based on common job requirements
                     tech_skills = [
-                        'Java', 'Python', 'JavaScript', 'React', 'Angular', 'Spring', 'Spring Boot', 
-                        'SQL', 'AWS', 'Azure', 'GCP', 'Cloud', 'Docker', 'Kubernetes', 'REST', 
-                        'RESTful', 'API', 'Git', 'Agile', 'Node.js', 'TypeScript', 'MongoDB', 
-                        'PostgreSQL', 'MySQL', 'Redis', 'Jenkins', 'CI/CD', 'Microservices',
-                        'HTML', 'CSS', 'Vue', 'Redux', 'GraphQL', 'Kafka', 'RabbitMQ',
-                        'JPA', 'Hibernate', 'Maven', 'Gradle', 'JUnit', 'Testing',
-                        'Full Stack', 'Frontend', 'Backend', 'DevOps', 'Scrum', 'TDD'
+                        # Programming Languages
+                        'Java', 'Python', 'JavaScript', 'TypeScript', 'C#', 'C++', 'Ruby', 'Go', 'Scala', 'PHP',
+                        # Frontend
+                        'React', 'Angular', 'Vue', 'HTML', 'CSS', 'SASS', 'Redux', 'Next.js', 'Svelte',
+                        # Backend
+                        'Spring', 'Spring Boot', 'Node.js', 'Express', 'Django', 'Flask', 'FastAPI', '.NET',
+                        # Databases
+                        'SQL', 'MySQL', 'PostgreSQL', 'MongoDB', 'Redis', 'Oracle', 'Cassandra', 'DynamoDB',
+                        # Cloud & DevOps
+                        'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Jenkins', 'CI/CD', 'Terraform',
+                        # Data & BI
+                        'Tableau', 'Power BI', 'Excel', 'SQL Server', 'ETL', 'Data Warehouse', 'Snowflake',
+                        'Apache Spark', 'Hadoop', 'Airflow', 'SSIS', 'SSRS', 'DAX', 'MDX',
+                        # APIs & Integration
+                        'REST', 'RESTful', 'API', 'GraphQL', 'SOAP', 'Microservices', 'Kafka', 'RabbitMQ',
+                        # Testing & Quality
+                        'JUnit', 'Jest', 'Selenium', 'Testing', 'TDD', 'pytest', 'Cypress',
+                        # Tools & Frameworks
+                        'Git', 'GitHub', 'GitLab', 'JIRA', 'Confluence', 'Agile', 'Scrum', 'Kanban',
+                        'JPA', 'Hibernate', 'Maven', 'Gradle', 'npm', 'webpack',
+                        # General
+                        'Full Stack', 'Frontend', 'Backend', 'DevOps', 'Machine Learning', 'AI', 'Data Science'
                     ]
-                    
+
                     # Check both description and title for skills
                     combined_text = f"{description} {title}".lower() if description else title.lower() if title else ""
                     seen_skills = set()
-                    
+
                     for skill in tech_skills:
-                        if skill.lower() in combined_text and skill not in seen_skills:
+                        # Use word boundaries for more accurate matching
+                        import re
+                        pattern = r'\b' + re.escape(skill.lower()) + r'\b'
+                        if re.search(pattern, combined_text) and skill not in seen_skills:
                             skills.append(skill)
                             seen_skills.add(skill)
                     
@@ -1031,127 +1198,186 @@ class LinkedInScraperPlaywright:
                     job_data["requirements"] = requirements if requirements else ["See job posting for requirements"]
                     job_data["qualifications"] = []
                     job_data["responsibilities"] = []
-                    job_data["level"] = None  # Will be populated from detail panel
-                    
-                    # Click job to get full details
-                    logger.info(f"Extracting detailed info for job {i+1}/{len(job_cards)}: {title}")
-                    try:
-                        # Make sure card is in view
-                        await card.scroll_into_view_if_needed()
-                        await asyncio.sleep(0.5)
-                        
-                        # Try multiple click strategies
-                        clicked = False
-                        
-                        # Strategy 1: Click the title link
-                        title_link = await card.query_selector('a[class*="job-card-list__title"], a.job-card-container__link, a[href*="/jobs/view/"]')
-                        if title_link:
-                            try:
-                                await title_link.click()
-                                clicked = True
-                                logger.debug("Clicked title link")
-                            except:
-                                pass
-                        
-                        # Strategy 2: Click anywhere on the card
-                        if not clicked:
-                            try:
-                                await card.click()
-                                clicked = True
-                                logger.debug("Clicked card element")
-                            except:
-                                pass
-                        
-                        # Strategy 3: Use JavaScript to click
-                        if not clicked:
-                            try:
-                                await self.page.evaluate('(element) => element.click()', card)
-                                clicked = True
-                                logger.debug("Clicked via JavaScript")
-                            except:
-                                pass
-                        
-                        if not clicked:
-                            logger.warning(f"Could not click job {i+1}")
-                            continue
-                        
-                        # Wait longer and check if panel loaded
-                        await asyncio.sleep(4)  # Increased wait time
-                        
-                        # Check if we're on a new page (job detail page) or still on search
-                        current_url = self.page.url
-                        if '/jobs/view/' in current_url:
-                            logger.info("Navigated to job detail page")
-                            # Wait for the page to load
-                            await self.page.wait_for_load_state('networkidle')
-                        
-                        # Extract full details from the panel
-                        full_details = await self._extract_job_details_from_panel()
-                        
-                        # If no details and we have a URL, try navigating directly
-                        if (not full_details or not full_details.get('responsibilities') or 
-                            full_details.get('responsibilities') == ["See job posting for full responsibilities"]):
-                            if job_data.get('url'):
-                                logger.warning(f"No details from panel, trying direct navigation to {job_data['url']}")
-                                try:
-                                    await self.page.goto(job_data['url'], wait_until='networkidle', timeout=10000)
-                                    await asyncio.sleep(3)
-                                    full_details = await self._extract_job_details_from_panel()
-                                    # Navigate back
-                                    await self.page.go_back()
-                                    await asyncio.sleep(2)
-                                except Exception as e:
-                                    logger.error(f"Direct navigation failed: {e}")
-                        
-                        # Update job data with full details
-                        if full_details:
-                            # Update with better data from detail panel
-                            if full_details.get('description'):
-                                job_data['description'] = full_details['description']
-                            if full_details.get('responsibilities'):
-                                job_data['responsibilities'] = full_details['responsibilities']
-                            if full_details.get('requirements'):
-                                job_data['requirements'] = full_details['requirements']
-                            if full_details.get('skills'):
-                                # Merge skills from both sources
-                                existing_skills = job_data.get('skills', [])
-                                if isinstance(existing_skills, list) and existing_skills != ["Not specified"]:
-                                    all_skills = list(set(existing_skills + full_details['skills']))
-                                    job_data['skills'] = all_skills[:15]
-                                else:
-                                    job_data['skills'] = full_details['skills']
-                            if full_details.get('experience_level'):
-                                job_data['experience_level'] = full_details['experience_level']
-                            if full_details.get('level') is not None:
-                                job_data['level'] = full_details['level']
-                                logger.info(f"Extracted experience years: {full_details['level']}")
-                        
-                        # Close detail panel (ESC key) to return to job list
-                        await self.page.keyboard.press('Escape')
-                        await asyncio.sleep(0.5)
-                        
-                    except Exception as e:
-                        logger.debug(f"Could not get full details for job {i}: {e}")
-                        # Keep the default values if extraction fails
-                    
-                    # Add ALL jobs - even with missing data
-                    # LinkedIn already filtered for relevant results
-                    jobs.append(job_data)
-                    logger.info(f"Extracted: {job_data.get('title', 'Unknown')} at {job_data.get('company', 'Unknown')} - Salary: {job_data.get('salary_range', 'N/A')}")
-                    
-                    # Log if URL is missing for debugging
-                    if not job_data.get("url"):
-                        logger.debug(f"Note: Job '{job_data.get('title')}' has no URL")
-                    
+
+                    # Extract years of experience from combined text
+                    years_level = None
+                    if combined_text:
+                        years_level = self._extract_years_as_level(combined_text)
+
+                    # If not found in description, try to infer from title
+                    if years_level is None and title:
+                        title_lower = title.lower()
+                        if 'senior' in title_lower or 'sr.' in title_lower or 'sr ' in title_lower:
+                            years_level = 5  # Assume 5+ years for senior roles
+                        elif 'lead' in title_lower or 'principal' in title_lower:
+                            years_level = 7  # Assume 7+ years for lead roles
+                        elif 'junior' in title_lower or 'jr.' in title_lower or 'entry' in title_lower:
+                            years_level = 0  # Entry level
+                        elif 'mid' in title_lower:
+                            years_level = 3  # Mid-level
+
+                    job_data["level"] = years_level
+
+                    # Add to basic jobs list
+                    jobs_basic_data.append(job_data)
+                    logger.info(f"Extracted basic info [{i+1}/{len(job_cards)}]: {job_data.get('title', 'Unknown')} at {job_data.get('company', 'Unknown')} | Level: {years_level or 'N/A'} yrs")
+
+
                 except Exception as e:
-                    logger.warning(f"Failed to extract job from card: {e}")
+                    logger.warning(f"Failed to extract basic info from card {i}: {e}")
                     continue
-            
-            logger.info(f"Extracted {len(jobs)} jobs from current page")
-            
+
+            logger.info(f"Phase 1 complete: Extracted basic info from {len(jobs_basic_data)} jobs")
+
+            # PHASE 2: Get detailed info by clicking jobs to open side panel
+            # This avoids navigation and context destruction
+            ENABLE_PHASE_2 = True  # Set to False to disable detailed extraction
+
+            if ENABLE_PHASE_2 and working_selector:
+                logger.info("Phase 2: Clicking jobs to extract detailed information...")
+
+                # Re-query for job cards using the SAME selector that worked in Phase 1
+                current_cards = await self.page.query_selector_all(working_selector)
+                logger.info(f"Re-queried using '{working_selector}' and found {len(current_cards)} job cards for Phase 2")
+
+                for i, job_data in enumerate(jobs_basic_data):
+                    try:
+                        # Make sure we have a corresponding card
+                        if i >= len(current_cards):
+                            logger.warning(f"No card element for job {i}, skipping detailed extraction")
+                            jobs.append(job_data)
+                            continue
+
+                        card = current_cards[i]
+                        logger.info(f"Getting details [{i+1}/{len(jobs_basic_data)}]: {job_data.get('title', 'Unknown')}")
+
+                        # Click the job card to open side panel (NOT navigate)
+                        try:
+                            # Scroll card into view
+                            await card.scroll_into_view_if_needed()
+                            await asyncio.sleep(0.3)
+
+                            # Click the card
+                            await card.click()
+                            await asyncio.sleep(2)  # Wait for panel to load
+
+                            # Check if we're still on the same page (didn't navigate)
+                            current_url = self.page.url
+                            if '/jobs/search' in current_url or '/jobs/' in current_url:
+                                # Good! We're still on the search page, panel should be open
+                                logger.info(f"[Job {i}] Still on search page, extracting details from panel...")
+
+                                # Extract full details from the side panel
+                                full_details = await self._extract_job_details_from_panel()
+
+                                # Update job data with full details
+                                if full_details:
+                                    logger.info(f"[Job {i}] Got full_details: {list(full_details.keys())}")
+
+                                    if full_details.get('description') and len(full_details.get('description', '')) > 100:
+                                        job_data['description'] = full_details['description']
+                                        logger.info(f"[Job {i}] ✓ Updated description")
+
+                                    if full_details.get('responsibilities') and full_details['responsibilities'] != ["See job posting for full responsibilities"]:
+                                        job_data['responsibilities'] = full_details['responsibilities']
+                                        logger.info(f"[Job {i}] ✓ Updated responsibilities: {len(job_data['responsibilities'])} items")
+
+                                    if full_details.get('requirements'):
+                                        job_data['requirements'] = full_details['requirements']
+                                        logger.info(f"[Job {i}] ✓ Updated requirements: {len(job_data['requirements'])} items")
+
+                                    if full_details.get('skills') and len(full_details.get('skills', [])) > 0:
+                                        # Merge skills from both sources
+                                        existing_skills = job_data.get('skills', [])
+                                        if isinstance(existing_skills, list) and existing_skills != ["Not specified"]:
+                                            all_skills = list(set(existing_skills + full_details['skills']))
+                                            job_data['skills'] = all_skills[:15]
+                                        else:
+                                            job_data['skills'] = full_details['skills']
+                                        logger.info(f"[Job {i}] ✓ Updated skills: {job_data['skills'][:3]}")
+
+                                    if full_details.get('experience_level'):
+                                        job_data['experience_level'] = full_details['experience_level']
+                                        logger.info(f"[Job {i}] ✓ Updated experience_level: {job_data['experience_level']}")
+
+                                    if full_details.get('level') is not None:
+                                        job_data['level'] = full_details['level']
+                                        logger.info(f"[Job {i}] ✓ Updated level: {job_data['level']}")
+
+                                    # FIX 3: Also update job_type, applicants, posted if found in panel
+                                    if full_details.get('job_type'):
+                                        job_data['job_type'] = full_details['job_type']
+                                        logger.info(f"[Job {i}] ✓ Updated job_type: {job_data['job_type']}")
+
+                                    if full_details.get('applicants_count'):
+                                        job_data['applicants_count'] = full_details['applicants_count']
+                                        logger.info(f"[Job {i}] ✓ Updated applicants_count: {job_data['applicants_count']}")
+
+                                    if full_details.get('posted_date'):
+                                        job_data['posted_date'] = full_details['posted_date']
+                                        logger.info(f"[Job {i}] ✓ Updated posted_date: {job_data['posted_date']}")
+
+                                    logger.info(f"[Job {i}] ✓ Detailed extraction successful")
+                                else:
+                                    logger.warning(f"[Job {i}] ❌ No details extracted from panel (full_details is empty)")
+
+                                # Close the panel (press ESC)
+                                await self.page.keyboard.press('Escape')
+                                await asyncio.sleep(0.5)
+                            else:
+                                # We navigated to a new page, go back
+                                logger.warning(f"Navigated away from search page, going back...")
+                                await self.page.go_back(wait_until='domcontentloaded')
+                                await asyncio.sleep(2)
+                                # Re-query cards after going back using the SAME selector
+                                current_cards = await self.page.query_selector_all(working_selector)
+
+                        except Exception as e:
+                            logger.warning(f"Could not get detailed info for job {i}: {e}")
+                            # Try to close any open panels
+                            try:
+                                await self.page.keyboard.press('Escape')
+                                await asyncio.sleep(0.3)
+                            except:
+                                pass
+
+                        # Add job to final list
+                        jobs.append(job_data)
+
+                        # Log extraction summary
+                        logger.info(f"Complete: {job_data.get('title', 'Unknown')} | "
+                                  f"Type: {job_data.get('job_type', 'N/A')} | "
+                                  f"Level: {job_data.get('experience_level', 'N/A')} | "
+                                  f"Skills: {len(job_data.get('skills', []))} | "
+                                  f"Posted: {job_data.get('posted_date', 'N/A')} | "
+                                  f"Applicants: {job_data.get('applicants_count', 'N/A')}")
+
+                    except Exception as e:
+                        logger.warning(f"Failed to process job {i}: {e}")
+                        # Still add the job with basic data
+                        jobs.append(job_data)
+                        continue
+            else:
+                # Just use basic data from Phase 1
+                if not ENABLE_PHASE_2:
+                    logger.info("Phase 2 disabled - using basic data from Phase 1")
+                elif not working_selector:
+                    logger.error("No working selector found in Phase 1 - cannot run Phase 2")
+                jobs = jobs_basic_data
+
+                # Log summary of what we extracted
+                for job_data in jobs:
+                    logger.info(f"Job: {job_data.get('title', 'Unknown')} | "
+                              f"Type: {job_data.get('job_type', 'N/A')} | "
+                              f"Level: {job_data.get('experience_level', 'N/A')} | "
+                              f"Posted: {job_data.get('posted_date', 'N/A')} | "
+                              f"Applicants: {job_data.get('applicants_count', 'N/A')}")
+
+            logger.info(f"Extracted complete data for {len(jobs)} jobs from current page")
+
         except Exception as e:
             logger.error(f"Failed to extract jobs: {e}")
-        
+
         return jobs
     
     async def run_full_search(self, job_categories: List[Dict[str, Any]]):
@@ -1271,9 +1497,9 @@ async def test_scraper():
 
 
 if __name__ == "__main__":
-    # Set up logging
+    # Set up logging with DEBUG level to see detailed extraction info
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,  # Changed to DEBUG for detailed logging
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     

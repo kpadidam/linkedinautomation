@@ -17,10 +17,14 @@ sys.path.insert(0, str(project_root))
 from scrapers.linkedin_scraper_playwright import LinkedInScraperPlaywright
 from config import settings
 
-# Configure logging
+# Configure logging - DEBUG mode for diagnostic run
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,  # Changed to DEBUG for detailed diagnostic logging
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('scraper_debug.log', mode='w')  # Save to file for analysis
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -59,9 +63,16 @@ class JobSearchAutomation:
         try:
             # Initialize the Playwright scraper
             scraper = LinkedInScraperPlaywright()
-            
-            # Run full search with all categories
-            all_jobs = await scraper.run_full_search(self.job_config['job_categories'])
+
+            # DIAGNOSTIC MODE: Test with just 1 category
+            logger.warning("=" * 60)
+            logger.warning("DIAGNOSTIC MODE: Testing with 1 category, 3 jobs max")
+            logger.warning("=" * 60)
+            test_categories = [self.job_config['job_categories'][0]]  # Just first category
+            test_categories[0]['max_results'] = 3  # Limit to 3 jobs for focused logs
+
+            # Run full search with test categories
+            all_jobs = await scraper.run_full_search(test_categories)
             
             self.total_jobs_found = len(all_jobs)
             self.total_jobs_matched = len([j for j in all_jobs if j.get('resume_match_score', 0) >= 70])

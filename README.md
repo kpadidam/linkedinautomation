@@ -117,7 +117,7 @@ Edit `config/job_preferences.json` to set your job search criteria:
 Run the LinkedIn scraper directly:
 
 ```bash
-python linkedin_scraper.py
+python linkedin.py
 ```
 
 The scraper will:
@@ -147,7 +147,7 @@ linkedin-job-automation/
 │   └── job_model.py             # Job data models
 ├── app/
 │   └── main.py                  # FastAPI web dashboard
-├── linkedin_scraper.py          # Main entry point script
+├── linkedin.py                  # Main entry point script
 ├── config.py                    # Configuration management
 ├── .env                         # Your environment variables
 ├── .gitignore                   # Git ignore rules

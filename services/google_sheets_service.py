@@ -192,7 +192,8 @@ class GoogleSheetsService:
     def add_job(self, job: JobListing):
         """
         Add a single job to the spreadsheet.
-        
+        Automatically skips duplicates.
+
         Args:
             job: JobListing to add
         """
@@ -200,15 +201,20 @@ class GoogleSheetsService:
             if not self.service:
                 logger.warning("Google Sheets service not initialized, skipping job logging")
                 return
-            
+
+            # Check for duplicates BEFORE adding
+            if self.check_duplicate(job.job_id):
+                logger.debug(f"Skipping duplicate job: {job.title} at {job.company} (ID: {job.job_id})")
+                return  # Skip silently
+
             # Convert job to Google Sheets row
             row = GoogleSheetRow.from_job_listing(job)
-            
+
             # Append to spreadsheet
             body = {
                 'values': [row.to_list()]
             }
-            
+
             self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range='A:P',
@@ -216,9 +222,9 @@ class GoogleSheetsService:
                 insertDataOption='INSERT_ROWS',
                 body=body
             ).execute()
-            
+
             logger.info(f"Added job '{job.title}' at '{job.company}' to spreadsheet")
-            
+
         except HttpError as e:
             logger.error(f"Failed to add job to spreadsheet: {e}")
             raise
@@ -226,7 +232,8 @@ class GoogleSheetsService:
     def add_jobs_batch(self, jobs: List[JobListing]):
         """
         Add multiple jobs to the spreadsheet in a batch.
-        
+        Automatically filters out duplicates.
+
         Args:
             jobs: List of JobListings to add
         """
@@ -234,19 +241,37 @@ class GoogleSheetsService:
             if not self.service:
                 logger.warning("Google Sheets service not initialized, skipping batch logging")
                 return
-            
+
             if not jobs:
                 logger.warning("No jobs to add")
                 return
-            
-            # Convert all jobs to rows
-            rows = [GoogleSheetRow.from_job_listing(job).to_list() for job in jobs]
-            
+
+            # Get all existing job IDs in one API call (efficient)
+            existing_ids = self._get_existing_job_ids()
+
+            # Filter out duplicates
+            new_jobs = []
+            duplicate_count = 0
+
+            for job in jobs:
+                if job.job_id in existing_ids:
+                    logger.debug(f"Skipping duplicate job: {job.title} at {job.company} (ID: {job.job_id})")
+                    duplicate_count += 1
+                else:
+                    new_jobs.append(job)
+
+            if not new_jobs:
+                logger.info(f"All {len(jobs)} jobs are duplicates, nothing to add")
+                return
+
+            # Convert all new jobs to rows
+            rows = [GoogleSheetRow.from_job_listing(job).to_list() for job in new_jobs]
+
             # Batch append to spreadsheet
             body = {
                 'values': rows
             }
-            
+
             self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range='A:P',
@@ -254,9 +279,9 @@ class GoogleSheetsService:
                 insertDataOption='INSERT_ROWS',
                 body=body
             ).execute()
-            
-            logger.info(f"Added {len(jobs)} jobs to spreadsheet in batch")
-            
+
+            logger.info(f"Added {len(new_jobs)} new jobs to spreadsheet ({duplicate_count} duplicates skipped)")
+
         except HttpError as e:
             logger.error(f"Failed to add jobs batch to spreadsheet: {e}")
             raise
@@ -338,37 +363,67 @@ class GoogleSheetsService:
     
     def check_duplicate(self, job_id: str) -> bool:
         """
-        Check if a job already exists in the spreadsheet.
-        
+        Check if a job already exists in the spreadsheet by Job ID.
+
         Args:
             job_id: Job ID to check
-            
+
         Returns:
             True if duplicate exists, False otherwise
         """
         try:
             if not self.service:
                 return False
-            
-            # Get all job URLs (column O)
+
+            # Get all job IDs from column A
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id,
-                range='O:O'
+                range='A:A'  # Changed from 'O:O' to 'A:A' (Job ID column)
             ).execute()
-            
-            urls = result.get('values', [])
-            
-            # Check if job_id appears in any URL
-            for url_row in urls[1:]:  # Skip header
-                if url_row and job_id in url_row[0]:
+
+            values = result.get('values', [])
+
+            # Check if job_id exists (skip header row)
+            for row in values[1:]:  # Skip header
+                if row and row[0] == job_id:  # Exact match instead of 'in'
                     return True
-            
+
             return False
-            
+
         except HttpError as e:
             logger.error(f"Failed to check for duplicates: {e}")
-            return False
-    
+            return False  # On error, don't skip (safer default)
+
+    def _get_existing_job_ids(self) -> set:
+        """
+        Get all existing job IDs from the spreadsheet.
+        Used for efficient batch duplicate checking.
+
+        Returns:
+            Set of job IDs currently in the spreadsheet
+        """
+        try:
+            if not self.service:
+                return set()
+
+            # Get all job IDs from column A
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range='A:A'
+            ).execute()
+
+            values = result.get('values', [])
+
+            # Extract IDs (skip header row, handle empty cells)
+            job_ids = {row[0] for row in values[1:] if row and row[0]}
+
+            logger.debug(f"Found {len(job_ids)} existing job IDs in spreadsheet")
+            return job_ids
+
+        except HttpError as e:
+            logger.error(f"Failed to fetch existing job IDs: {e}")
+            return set()  # Return empty set on error (don't skip jobs)
+
     def get_spreadsheet_url(self) -> str:
         """
         Get the URL to view the spreadsheet.

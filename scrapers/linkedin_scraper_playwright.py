@@ -1399,13 +1399,13 @@ class LinkedInScraperPlaywright:
                 logger.info(f"{'='*60}")
                 
                 # Search each keyword in the category
-                for keyword in category['keywords'][:3]:  # Limit to first 3 keywords
+                for keyword in category['keywords']:  # Search all keywords
                     params = JobSearchParams(
                         keywords=keyword,
                         location=category.get('location', 'United States'),
                         job_type=category.get('job_type', ['full-time'])[0],
                         posted_within="24h",  # Will be changed to 1 hour
-                        max_results=min(20, category.get('max_results', 50))
+                        max_results=category.get('max_results', 50)
                     )
                     
                     jobs = await self.search_and_extract_jobs(params)

@@ -64,15 +64,8 @@ class JobSearchAutomation:
             # Initialize the Playwright scraper
             scraper = LinkedInScraperPlaywright()
 
-            # DIAGNOSTIC MODE: Test with just 1 category
-            logger.warning("=" * 60)
-            logger.warning("DIAGNOSTIC MODE: Testing with 1 category, 3 jobs max")
-            logger.warning("=" * 60)
-            test_categories = [self.job_config['job_categories'][0]]  # Just first category
-            test_categories[0]['max_results'] = 3  # Limit to 3 jobs for focused logs
-
-            # Run full search with test categories
-            all_jobs = await scraper.run_full_search(test_categories)
+            # Run full search across all configured job categories
+            all_jobs = await scraper.run_full_search(self.job_config['job_categories'])
             
             self.total_jobs_found = len(all_jobs)
             self.total_jobs_matched = len([j for j in all_jobs if j.get('resume_match_score', 0) >= 70])

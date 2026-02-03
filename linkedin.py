@@ -140,7 +140,7 @@ if __name__ == "__main__":
         print("❌ config/user_profile.json not found!")
         sys.exit(1)
     
-    if not Path("Karthik_Fullstack_Developer.pdf").exists():
+    if not Path("resumes/resume.pdf").exists():
         print("⚠️  Resume PDF not found, matching may be limited")
     
     # Run the automation

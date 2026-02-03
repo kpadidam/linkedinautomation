@@ -37,10 +37,24 @@ This folder contains the configuration files needed to run the LinkedIn Job Auto
    - **Rename it to `credentials.json`** and place it in this `/config` folder
 
 5. **Share Your Google Sheet**
-   - Create a new Google Sheet for storing job data
+   - Create a new Google Sheet for storing job data (can be completely empty)
    - Copy the Sheet ID from the URL: `https://docs.google.com/spreadsheets/d/[SHEET_ID]/edit`
    - Share the sheet with the service account email from your `credentials.json` file
    - Give **Editor** permissions
+
+**What happens automatically:**
+The system will create these 16 column headers on first run:
+- `Job ID`, `Date`, `Time`, `Role`, `Company`, `Location`
+- `Job Type`, `Level`, `Link`, `Job Responsibilities` 
+- `Preferred Skills`, `Matching Skills`, `Role Match %`
+- `Salary`, `Posted`, `Number of Applicants`
+
+**Example row data:**
+```
+123456 | 2026-02-03 | 14:30:25 | Data Analyst | TechCorp | San Francisco, CA |
+Full-time | Mid-level | https://linkedin.com/jobs/123456 | • Analyze data trends... |
+Python, SQL, Tableau | Python, SQL | 85% | $80,000 - $100,000 | 2 days ago | 15 applicants
+```
 
 ### 2. `job_preferences.json` - Job Search Criteria
 

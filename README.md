@@ -237,7 +237,12 @@ LOG_LEVEL=DEBUG
    - Give **Editor** permissions
    - Send invitation
 
-**Note:** The system automatically creates column headers when it runs for the first time.
+**Note:** The system automatically creates these column headers when it runs for the first time:
+```
+Job ID | Date | Time | Role | Company | Location | Job Type | Level | 
+Link | Job Responsibilities | Preferred Skills | Matching Skills | 
+Role Match % | Salary | Posted | Number of Applicants
+```
 
  🤝 Contributing
 

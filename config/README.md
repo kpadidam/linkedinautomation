@@ -43,7 +43,7 @@ This folder contains the configuration files needed to run the LinkedIn Job Auto
    - Give **Editor** permissions
 
 **What happens automatically:**
-The system will create these 16 column headers on first run:
+The system will create these 16 column headers when it first connects to your sheet:
 - `Job ID`, `Date`, `Time`, `Role`, `Company`, `Location`
 - `Job Type`, `Level`, `Link`, `Job Responsibilities` 
 - `Preferred Skills`, `Matching Skills`, `Role Match %`

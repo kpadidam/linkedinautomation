@@ -37,6 +37,10 @@ class GoogleSheetsService:
         self.credentials = None
         self._authenticate()
         
+        # Ensure headers exist in the spreadsheet
+        if self.service and self.spreadsheet_id:
+            self._ensure_headers_exist()
+        
     def _authenticate(self):
         """Authenticate with Google Sheets API."""
         try:
@@ -188,6 +192,33 @@ class GoogleSheetsService:
             
         except HttpError as e:
             logger.error(f"Failed to format header row: {e}")
+    
+    def _ensure_headers_exist(self):
+        """Check if headers exist and add them if missing."""
+        try:
+            # Check if sheet has any data in first row
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range='A1:P1'
+            ).execute()
+            
+            values = result.get('values', [])
+            expected_headers = GoogleSheetRow.get_headers()
+            
+            # If no data or headers don't match, initialize headers
+            if not values or values[0] != expected_headers:
+                logger.info("Headers missing or incorrect, initializing...")
+                self._initialize_headers()
+            else:
+                logger.debug("Headers already exist and are correct")
+                
+        except HttpError as e:
+            logger.warning(f"Could not check headers, assuming they need initialization: {e}")
+            # If we can't check, try to initialize (might fail if already exists)
+            try:
+                self._initialize_headers()
+            except:
+                pass  # Headers might already exist
     
     def add_job(self, job: JobListing):
         """

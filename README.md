@@ -2,6 +2,30 @@
 
 An intelligent job search automation tool that scrapes LinkedIn jobs, matches them with your resume, and logs everything to Google Sheets.
 
+## ⚡ **QUICK START** - New Users Start Here!
+
+**Want to get running in 5 minutes?** Use our automated setup script:
+
+### Mac/Linux:
+```bash
+git clone https://github.com/kpadidam/linkedinautomation.git
+cd linkedinautomation
+./setup.sh
+```
+
+### Windows:
+```cmd
+git clone https://github.com/kpadidam/linkedinautomation.git
+cd linkedinautomation
+setup.bat
+```
+
+**The setup script installs everything automatically:** Python, pip, Node.js, all packages, Playwright, and creates config templates.
+
+**Then just configure your API keys and run!** See [QUICK_START.md](QUICK_START.md) for details.
+
+---
+
  🚀 Features
 
 - Automated LinkedIn Job Scraping: Search for jobs based on your preferences without manual browsing

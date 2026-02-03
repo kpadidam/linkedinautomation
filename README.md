@@ -4,6 +4,10 @@ An intelligent job search automation tool that scrapes LinkedIn jobs, matches th
 
 ## ⚡ **QUICK START** - New Users Start Here!
 
+### 👶 **Complete Beginner?** 
+**Never used the command line or APIs?** Start with [BEGINNER_GUIDE.md](BEGINNER_GUIDE.md) - it explains everything from scratch!
+
+### 🚀 **Have Some Technical Experience?**
 **Want to get running in 5 minutes?** Use our automated setup script:
 
 ### Mac/Linux:

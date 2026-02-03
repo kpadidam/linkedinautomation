@@ -2,6 +2,8 @@
 
 Get the LinkedIn Job Automation running in **one command** - no prior setup needed!
 
+**👶 Complete Beginner?** If you've never used the command line or APIs before, check out our [BEGINNER_GUIDE.md](BEGINNER_GUIDE.md) which explains everything step-by-step!
+
 ## ⚡ Instant Setup
 
 ### For Mac/Linux Users:

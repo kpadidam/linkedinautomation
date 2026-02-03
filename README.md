@@ -225,13 +225,19 @@ LOG_LEVEL=DEBUG
 
  📊 Google Sheets Setup
 
-1. Create a new Google Sheet
-2. Copy the Sheet ID from the URL:
+1. **Create a new Google Sheet** (can be completely empty)
+2. **Copy the Sheet ID** from the URL:
    ```
    https://docs.google.com/spreadsheets/d/[SHEET_ID_HERE]/edit
    ```
-3. Add the Sheet ID to your `.env` file
-4. Share the sheet with the service account email from config/credentials.json
+3. **Add the Sheet ID** to your `.env` file: `GOOGLE_SHEETS_ID=your_sheet_id_here`
+4. **Share the sheet** with the service account email from `config/credentials.json`
+   - Click "Share" button in Google Sheets
+   - Add the `client_email` from your credentials file  
+   - Give **Editor** permissions
+   - Send invitation
+
+**Note:** The system automatically creates column headers when it runs for the first time.
 
  🤝 Contributing
 

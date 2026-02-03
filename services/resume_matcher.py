@@ -103,8 +103,10 @@ class ResumeMatcherService:
             
             # Use Groq for fast analysis if available, otherwise OpenAI
             if self.groq_client:
+                logger.info("Using Groq for fast AI analysis")
                 analysis = await self._analyze_with_groq(job_context)
             else:
+                logger.info("Using OpenAI for AI analysis")
                 analysis = await self._analyze_with_openai(job_context)
             
             # Update job with match score
@@ -244,8 +246,8 @@ class ResumeMatcherService:
                     {"role": "system", "content": "You are a career advisor. Return only valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
-                max_tokens=2000
+                temperature=0.1,  # Lower for faster, more consistent results
+                max_tokens=1500  # Reduced for faster response
             )
             
             # Extract JSON from response

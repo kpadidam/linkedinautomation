@@ -23,54 +23,57 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment Variables
+# Environment / secrets
 .env
 .env.local
 .env.*.local
+credentials.json
+token.json
+*.pem
+*.key
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
-linkedin_jobs.db
 
 # Logs
 logs/
 *.log
 
-# IDE
+# IDE / OS
 .vscode/
 .idea/
 *.swp
 *.swo
 .DS_Store
 
-# Google Sheets Credentials
-token.json
+# Personal data (resumes etc.)
+*.pdf
+karthik_skills.json
+ef jsc.txt
 
-# User Data - Don't commit actual resume
-resumes/*.pdf
-!resumes/README.md
+# Runtime browser state
+data/browser_profile/
 
-# Data files
-data/
-*.csv
-*.xlsx
+# Node / Vite
+node_modules/
+dashboard-ui/node_modules/
+dashboard-ui/dist/
+dashboard-ui/.vite/
 
 # Playwright
 playwright-report/
 test-results/
+login_failure.png
+login_error.png
 
-# Debug and temporary files
+# Temporary files
 *.tmp
 *.bak
 *~
-debug_*.png
-*.png
 
 # Search logs
 linkedin_scrape_log.json
 search_*.json
-
-# Claude
-.claude/config/credentials.json
+.claude/

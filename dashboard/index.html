@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Automator AI - Dashboard</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/dashboard-fix.css">
+    <link rel="stylesheet" href="css/dashboard-layout-fix.css">
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <i class="fas fa-robot"></i>
+                <span class="logo-text">Job Automator AI</span>
+            </div>
+        </div>
+        
+        <ul class="nav-menu">
+            <li class="nav-item active" data-page="dashboard">
+                <a href="#dashboard" class="nav-link">
+                    <i class="fas fa-home"></i>
+                    <span class="nav-text">Dashboard</span>
+                </a>
+            </li>
+            <li class="nav-item" data-page="search">
+                <a href="#search" class="nav-link">
+                    <i class="fas fa-search"></i>
+                    <span class="nav-text">Job Search</span>
+                </a>
+            </li>
+            <li class="nav-item" data-page="saved">
+                <a href="#saved" class="nav-link">
+                    <i class="fas fa-bookmark"></i>
+                    <span class="nav-text">Saved Jobs</span>
+                </a>
+            </li>
+            <li class="nav-item" data-page="profile">
+                <a href="#profile" class="nav-link">
+                    <i class="fas fa-user"></i>
+                    <span class="nav-text">Profile</span>
+                </a>
+            </li>
+            <li class="nav-item" data-page="statistics">
+                <a href="#statistics" class="nav-link">
+                    <i class="fas fa-chart-bar"></i>
+                    <span class="nav-text">Statistics</span>
+                </a>
+            </li>
+            <li class="nav-item" data-page="settings">
+                <a href="#settings" class="nav-link">
+                    <i class="fas fa-cog"></i>
+                    <span class="nav-text">Settings</span>
+                </a>
+            </li>
+        </ul>
+        
+        <div class="sidebar-footer">
+            <div class="status-indicator">
+                <span class="status-dot active"></span>
+                <span class="status-text">Sync Active</span>
+            </div>
+        </div>
+    </nav>
+    
+    <!-- Main Content Area -->
+    <div class="main-container">
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <button class="menu-toggle" id="menu-toggle">
+                <i class="fas fa-bars"></i>
+            </button>
+            
+            <div class="search-bar">
+                <i class="fas fa-search"></i>
+                <input type="text" placeholder="Search jobs, companies, or locations...">
+            </div>
+            
+            <div class="top-bar-actions">
+                <button class="icon-btn notification-btn">
+                    <i class="fas fa-bell"></i>
+                    <span class="badge">3</span>
+                </button>
+                
+                <button class="theme-toggle" id="theme-toggle">
+                    <i class="fas fa-moon"></i>
+                </button>
+                
+                <div class="profile-dropdown">
+                    <button class="profile-btn">
+                        <img src="https://ui-avatars.com/api/?name=John+Doe&background=2563EB&color=fff" alt="Profile">
+                        <span>John Doe</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Page Content -->
+        <main class="content">
+            <!-- Dashboard Page -->
+            <section id="dashboard" class="page active">
+                <div class="page-header">
+                    <h1>Dashboard</h1>
+                    <button class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Start New Search
+                    </button>
+                </div>
+                
+                <!-- Stats Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <i class="fas fa-briefcase"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3>Total Jobs Scraped</h3>
+                            <p class="stat-number">1,234</p>
+                            <span class="stat-change positive">+12% from last week</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <i class="fas fa-sync"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3>Active Searches</h3>
+                            <p class="stat-number">5</p>
+                            <span class="stat-change">Running now</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon purple">
+                            <i class="fas fa-percentage"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3>Average Match</h3>
+                            <p class="stat-number">78%</p>
+                            <span class="stat-change positive">+5% improvement</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon orange">
+                            <i class="fas fa-table"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3>Sheets Synced</h3>
+                            <p class="stat-number">42</p>
+                            <span class="stat-change">Last sync: 2 hours ago</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Charts Section -->
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <h3>Job Matches Over Time</h3>
+                            <select class="chart-filter">
+                                <option>Last 7 days</option>
+                                <option>Last 30 days</option>
+                                <option>Last 3 months</option>
+                            </select>
+                        </div>
+                        <canvas id="matchesChart"></canvas>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <h3>Top Keywords</h3>
+                        </div>
+                        <canvas id="keywordsChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Recent Activity -->
+                <div class="activity-card">
+                    <div class="card-header">
+                        <h3>Recent Activity</h3>
+                        <a href="#" class="link">View All</a>
+                    </div>
+                    <div class="activity-list">
+                        <div class="activity-item">
+                            <div class="activity-icon success">
+                                <i class="fas fa-check"></i>
+                            </div>
+                            <div class="activity-content">
+                                <p><strong>Senior Developer at Tech Corp</strong> - 95% match</p>
+                                <span class="activity-time">2 hours ago</span>
+                            </div>
+                        </div>
+                        <div class="activity-item">
+                            <div class="activity-icon info">
+                                <i class="fas fa-sync"></i>
+                            </div>
+                            <div class="activity-content">
+                                <p>Synced 23 jobs to Google Sheets</p>
+                                <span class="activity-time">5 hours ago</span>
+                            </div>
+                        </div>
+                        <div class="activity-item">
+                            <div class="activity-icon warning">
+                                <i class="fas fa-exclamation"></i>
+                            </div>
+                            <div class="activity-content">
+                                <p>New high-match job found: Product Manager at StartupXYZ</p>
+                                <span class="activity-time">1 day ago</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Job Search Page -->
+            <section id="search" class="page">
+                <div class="page-header">
+                    <h1>Job Search</h1>
+                </div>
+                
+                <div class="search-form-card">
+                    <form id="jobSearchForm" class="search-form">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="keywords">Keywords</label>
+                                <input type="text" id="keywords" placeholder="e.g., Python Developer, Data Scientist">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="location">Location</label>
+                                <select id="location">
+                                    <option>San Francisco, CA</option>
+                                    <option>New York, NY</option>
+                                    <option>Seattle, WA</option>
+                                    <option>Austin, TX</option>
+                                    <option>Remote</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="jobType">Job Type</label>
+                                <select id="jobType">
+                                    <option>Full-time</option>
+                                    <option>Part-time</option>
+                                    <option>Contract</option>
+                                    <option>Internship</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="experience">Experience Level</label>
+                                <select id="experience">
+                                    <option>Entry Level</option>
+                                    <option>Mid Level</option>
+                                    <option>Senior Level</option>
+                                    <option>Executive</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-toggles">
+                            <label class="toggle">
+                                <input type="checkbox" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Enable AI Matching</span>
+                            </label>
+                            
+                            <label class="toggle">
+                                <input type="checkbox" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Send to Google Sheets</span>
+                            </label>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary btn-large">
+                            <i class="fas fa-search"></i> Start Search
+                        </button>
+                    </form>
+                    
+                    <!-- Progress Indicator -->
+                    <div class="progress-container" id="searchProgress" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill"></div>
+                        </div>
+                        <p class="progress-text">Searching LinkedIn... <span id="progressPercent">0</span>%</p>
+                    </div>
+                </div>
+                
+                <!-- Results Section -->
+                <div class="results-section">
+                    <div class="results-header">
+                        <h3>Search Results</h3>
+                        <div class="results-filters">
+                            <button class="filter-btn">
+                                <i class="fas fa-filter"></i> Filter
+                            </button>
+                            <select class="sort-select">
+                                <option>Sort by Match %</option>
+                                <option>Sort by Date</option>
+                                <option>Sort by Company</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="results-table">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Job Title</th>
+                                    <th>Company</th>
+                                    <th>Location</th>
+                                    <th>Match %</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>
+                                        <strong>Senior Python Developer</strong>
+                                        <span class="text-muted">Posted 2 days ago</span>
+                                    </td>
+                                    <td>Tech Solutions Inc.</td>
+                                    <td>San Francisco, CA</td>
+                                    <td>
+                                        <div class="match-score high">92%</div>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge new">New</span>
+                                    </td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <button class="icon-btn" title="View Details">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            <button class="icon-btn" title="Save">
+                                                <i class="fas fa-bookmark"></i>
+                                            </button>
+                                            <button class="icon-btn" title="Apply">
+                                                <i class="fas fa-paper-plane"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <strong>Data Engineer</strong>
+                                        <span class="text-muted">Posted 1 week ago</span>
+                                    </td>
+                                    <td>DataCorp</td>
+                                    <td>New York, NY</td>
+                                    <td>
+                                        <div class="match-score medium">78%</div>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge viewed">Viewed</span>
+                                    </td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <button class="icon-btn" title="View Details">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            <button class="icon-btn" title="Save">
+                                                <i class="fas fa-bookmark"></i>
+                                            </button>
+                                            <button class="icon-btn" title="Apply">
+                                                <i class="fas fa-paper-plane"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <strong>Machine Learning Engineer</strong>
+                                        <span class="text-muted">Posted 3 days ago</span>
+                                    </td>
+                                    <td>AI Innovations</td>
+                                    <td>Seattle, WA</td>
+                                    <td>
+                                        <div class="match-score high">85%</div>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge applied">Applied</span>
+                                    </td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <button class="icon-btn" title="View Details">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            <button class="icon-btn active" title="Saved">
+                                                <i class="fas fa-bookmark"></i>
+                                            </button>
+                                            <button class="icon-btn" disabled title="Already Applied">
+                                                <i class="fas fa-check"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Saved Jobs Page -->
+            <section id="saved" class="page">
+                <div class="page-header">
+                    <h1>Saved Jobs</h1>
+                    <button class="btn btn-secondary">
+                        <i class="fas fa-download"></i> Export to Sheets
+                    </button>
+                </div>
+                
+                <div class="filter-bar">
+                    <button class="filter-chip active">All</button>
+                    <button class="filter-chip">Viewed</button>
+                    <button class="filter-chip">Applied</button>
+                    <button class="filter-chip">High Match (>80%)</button>
+                </div>
+                
+                <div class="jobs-grid">
+                    <div class="job-card">
+                        <div class="job-card-header">
+                            <div class="company-logo">
+                                <i class="fas fa-building"></i>
+                            </div>
+                            <div class="job-info">
+                                <h3>Senior Full Stack Developer</h3>
+                                <p class="company">Microsoft</p>
+                                <p class="location"><i class="fas fa-map-marker-alt"></i> Redmond, WA</p>
+                            </div>
+                            <div class="match-badge high">95%</div>
+                        </div>
+                        
+                        <div class="job-card-body">
+                            <p class="job-description">
+                                Join our team to build next-generation cloud applications using cutting-edge technologies...
+                            </p>
+                            
+                            <div class="job-tags">
+                                <span class="tag">React</span>
+                                <span class="tag">Node.js</span>
+                                <span class="tag">Azure</span>
+                                <span class="tag">TypeScript</span>
+                            </div>
+                            
+                            <div class="job-meta">
+                                <span><i class="fas fa-dollar-sign"></i> $150k-$200k</span>
+                                <span><i class="fas fa-users"></i> 50 applicants</span>
+                                <span><i class="fas fa-clock"></i> Posted 2 days ago</span>
+                            </div>
+                        </div>
+                        
+                        <div class="job-card-footer">
+                            <button class="btn btn-outline">Save for Later</button>
+                            <button class="btn btn-primary">Mark as Applied</button>
+                        </div>
+                        
+                        <div class="notes-section">
+                            <textarea placeholder="Add notes about this job..."></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="job-card">
+                        <div class="job-card-header">
+                            <div class="company-logo">
+                                <i class="fas fa-building"></i>
+                            </div>
+                            <div class="job-info">
+                                <h3>DevOps Engineer</h3>
+                                <p class="company">Google</p>
+                                <p class="location"><i class="fas fa-map-marker-alt"></i> Mountain View, CA</p>
+                            </div>
+                            <div class="match-badge high">88%</div>
+                        </div>
+                        
+                        <div class="job-card-body">
+                            <p class="job-description">
+                                Help us scale our infrastructure and improve deployment processes for billions of users...
+                            </p>
+                            
+                            <div class="job-tags">
+                                <span class="tag">Kubernetes</span>
+                                <span class="tag">Docker</span>
+                                <span class="tag">GCP</span>
+                                <span class="tag">Python</span>
+                            </div>
+                            
+                            <div class="job-meta">
+                                <span><i class="fas fa-dollar-sign"></i> $180k-$250k</span>
+                                <span><i class="fas fa-users"></i> 120 applicants</span>
+                                <span><i class="fas fa-clock"></i> Posted 1 week ago</span>
+                            </div>
+                        </div>
+                        
+                        <div class="job-card-footer">
+                            <button class="btn btn-outline">Save for Later</button>
+                            <button class="btn btn-primary">Mark as Applied</button>
+                        </div>
+                        
+                        <div class="notes-section">
+                            <textarea placeholder="Add notes about this job..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Profile Page -->
+            <section id="profile" class="page">
+                <div class="page-header">
+                    <h1>Profile</h1>
+                </div>
+                
+                <div class="profile-grid">
+                    <div class="profile-card">
+                        <h3>Resume Upload</h3>
+                        <div class="upload-area" id="resumeUpload">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <p>Drag & drop your resume here</p>
+                            <p class="text-muted">or</p>
+                            <button class="btn btn-outline">Browse Files</button>
+                            <input type="file" id="resumeFile" accept=".pdf,.doc,.docx" hidden>
+                        </div>
+                        
+                        <div class="uploaded-file" style="display: none;">
+                            <i class="fas fa-file-pdf"></i>
+                            <span>resume_2024.pdf</span>
+                            <button class="icon-btn">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        
+                        <button class="btn btn-primary btn-full">
+                            <i class="fas fa-brain"></i> Analyze Resume
+                        </button>
+                    </div>
+                    
+                    <div class="profile-card">
+                        <h3>Skills & Preferences</h3>
+                        <form class="profile-form">
+                            <div class="form-group">
+                                <label>Your Skills</label>
+                                <div class="tags-input">
+                                    <span class="tag">Python <i class="fas fa-times"></i></span>
+                                    <span class="tag">JavaScript <i class="fas fa-times"></i></span>
+                                    <span class="tag">React <i class="fas fa-times"></i></span>
+                                    <span class="tag">AWS <i class="fas fa-times"></i></span>
+                                    <input type="text" placeholder="Add skill...">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Preferred Locations</label>
+                                <div class="tags-input">
+                                    <span class="tag">San Francisco <i class="fas fa-times"></i></span>
+                                    <span class="tag">Remote <i class="fas fa-times"></i></span>
+                                    <input type="text" placeholder="Add location...">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Desired Roles</label>
+                                <input type="text" placeholder="e.g., Senior Developer, Tech Lead">
+                            </div>
+                            
+                            <button class="btn btn-primary">Save Preferences</button>
+                        </form>
+                    </div>
+                </div>
+                
+                <div class="skills-analysis">
+                    <h3>Analyzed Skills</h3>
+                    <div class="skills-grid">
+                        <div class="skill-item">
+                            <span class="skill-name">Python</span>
+                            <div class="skill-level">
+                                <div class="skill-fill" style="width: 90%"></div>
+                            </div>
+                        </div>
+                        <div class="skill-item">
+                            <span class="skill-name">JavaScript</span>
+                            <div class="skill-level">
+                                <div class="skill-fill" style="width: 85%"></div>
+                            </div>
+                        </div>
+                        <div class="skill-item">
+                            <span class="skill-name">Machine Learning</span>
+                            <div class="skill-level">
+                                <div class="skill-fill" style="width: 75%"></div>
+                            </div>
+                        </div>
+                        <div class="skill-item">
+                            <span class="skill-name">Cloud Computing</span>
+                            <div class="skill-level">
+                                <div class="skill-fill" style="width: 80%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Statistics Page -->
+            <section id="statistics" class="page">
+                <div class="page-header">
+                    <h1>Statistics</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary">
+                            <i class="fas fa-file-export"></i> Create New Sheet
+                        </button>
+                        <button class="btn btn-outline">
+                            <i class="fas fa-trash"></i> Clean Old Data
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="stats-overview">
+                    <div class="chart-card">
+                        <h3>Jobs Scraped Per Day</h3>
+                        <canvas id="dailyJobsChart"></canvas>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <h3>Top Companies</h3>
+                        <canvas id="topCompaniesChart"></canvas>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <h3>Average Match Score Trend</h3>
+                        <canvas id="matchTrendChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="recent-searches">
+                    <h3>Recent Searches</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Keywords</th>
+                                <th>Location</th>
+                                <th>Results</th>
+                                <th>Avg Match</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>2024-01-15</td>
+                                <td>Python Developer</td>
+                                <td>San Francisco</td>
+                                <td>156</td>
+                                <td>82%</td>
+                                <td><span class="status-badge success">Completed</span></td>
+                            </tr>
+                            <tr>
+                                <td>2024-01-14</td>
+                                <td>Data Scientist</td>
+                                <td>New York</td>
+                                <td>89</td>
+                                <td>76%</td>
+                                <td><span class="status-badge success">Completed</span></td>
+                            </tr>
+                            <tr>
+                                <td>2024-01-13</td>
+                                <td>Full Stack Engineer</td>
+                                <td>Remote</td>
+                                <td>234</td>
+                                <td>79%</td>
+                                <td><span class="status-badge success">Completed</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            
+            <!-- Settings Page -->
+            <section id="settings" class="page">
+                <div class="page-header">
+                    <h1>Settings</h1>
+                </div>
+                
+                <div class="settings-container">
+                    <div class="settings-section">
+                        <h3>API Configuration</h3>
+                        <form class="settings-form">
+                            <div class="form-group">
+                                <label>OpenAI API Key</label>
+                                <div class="input-with-button">
+                                    <input type="password" value="sk-...">
+                                    <button class="btn btn-small">Test</button>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Google Sheets API Key</label>
+                                <div class="input-with-button">
+                                    <input type="password" value="AIza...">
+                                    <button class="btn btn-small">Test</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h3>Search Configuration</h3>
+                        <form class="settings-form">
+                            <div class="form-group">
+                                <label>Search Limit</label>
+                                <input type="number" value="100" min="10" max="500">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Request Delay (seconds)</label>
+                                <input type="number" value="2" min="1" max="10">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Default Location</label>
+                                <select>
+                                    <option>San Francisco, CA</option>
+                                    <option>New York, NY</option>
+                                    <option>Seattle, WA</option>
+                                    <option>Remote</option>
+                                </select>
+                            </div>
+                            
+                            <label class="toggle">
+                                <input type="checkbox" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Headless Browser Mode</span>
+                            </label>
+                        </form>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h3>Notifications</h3>
+                        <form class="settings-form">
+                            <label class="toggle">
+                                <input type="checkbox" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Email notifications for high matches (>85%)</span>
+                            </label>
+                            
+                            <label class="toggle">
+                                <input type="checkbox">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Daily summary email</span>
+                            </label>
+                            
+                            <label class="toggle">
+                                <input type="checkbox" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Browser notifications</span>
+                            </label>
+                        </form>
+                    </div>
+                    
+                    <div class="settings-actions">
+                        <button class="btn btn-primary">Save Settings</button>
+                        <button class="btn btn-outline">Reset to Defaults</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <!-- Job Details Modal -->
+    <div class="modal" id="jobModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalJobTitle">Senior Python Developer</h2>
+                <button class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="job-details-grid">
+                    <div class="detail-item">
+                        <i class="fas fa-building"></i>
+                        <span id="modalCompany">Tech Corp</span>
+                    </div>
+                    <div class="detail-item">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <span id="modalLocation">San Francisco, CA</span>
+                    </div>
+                    <div class="detail-item">
+                        <i class="fas fa-dollar-sign"></i>
+                        <span id="modalSalary">$150k - $200k</span>
+                    </div>
+                    <div class="detail-item">
+                        <i class="fas fa-users"></i>
+                        <span id="modalApplicants">45 applicants</span>
+                    </div>
+                </div>
+                
+                <div class="job-description">
+                    <h3>Job Description</h3>
+                    <p id="modalDescription">
+                        We are looking for a talented Senior Python Developer to join our team...
+                    </p>
+                </div>
+                
+                <div class="skills-required">
+                    <h3>Required Skills</h3>
+                    <div class="skills-tags" id="modalSkills">
+                        <span class="tag">Python</span>
+                        <span class="tag">Django</span>
+                        <span class="tag">PostgreSQL</span>
+                        <span class="tag">AWS</span>
+                    </div>
+                </div>
+                
+                <div class="ai-analysis">
+                    <h3>AI Analysis</h3>
+                    <div class="analysis-score">
+                        <div class="score-circle">
+                            <span id="modalMatchScore">92%</span>
+                        </div>
+                        <div class="score-details">
+                            <p><strong>Overall Match</strong></p>
+                            <p class="text-muted">Based on your profile and resume</p>
+                        </div>
+                    </div>
+                    
+                    <div class="recommendations">
+                        <h4>Recommendations</h4>
+                        <ul id="modalRecommendations">
+                            <li>Strong match with your Python expertise</li>
+                            <li>Consider highlighting your Django projects</li>
+                            <li>AWS experience is a plus</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="interview-tips">
+                        <h4>Interview Tips</h4>
+                        <ul id="modalInterviewTips">
+                            <li>Prepare examples of scalable Python applications</li>
+                            <li>Review Django best practices</li>
+                            <li>Be ready to discuss cloud architecture</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn btn-outline">Save for Later</button>
+                <button class="btn btn-primary">
+                    <i class="fas fa-external-link-alt"></i> Apply on LinkedIn
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <i class="fas fa-check-circle"></i>
+        <span class="toast-message">Action completed successfully!</span>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="js/dashboard.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/charts.js"></script>
+</body>
+</html>

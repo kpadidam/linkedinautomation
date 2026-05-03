@@ -190,6 +190,7 @@ class UserProfile(Base):
     skills = Column(JSON, nullable=True)  # Store as JSON array
     preferred_locations = Column(JSON, nullable=True)  # Store as JSON array
     preferred_job_types = Column(JSON, nullable=True)  # Store as JSON array
+    search_roles = Column(JSON, nullable=True)  # Roles to scrape (overrides job_search_config.json)
     minimum_salary = Column(String(50), nullable=True)
     
     # Search preferences
@@ -232,6 +233,52 @@ class AnalysisCache(Base):
     
     def __repr__(self):
         return f"<AnalysisCache(job_id='{self.job_id}', type='{self.analysis_type}')>"
+
+
+class Followup(Base):
+    """Reminder linked to a job."""
+    __tablename__ = "followups"
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(String(100), nullable=False, index=True)
+    due_at = Column(DateTime, nullable=False)
+    note = Column(Text, nullable=True)
+    done = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "job_id": self.job_id,
+            "due_at": self.due_at.isoformat() if self.due_at else None,
+            "note": self.note,
+            "done": bool(self.done),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class InterviewEvent(Base):
+    """Interview scheduled for a job."""
+    __tablename__ = "interview_events"
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(String(100), nullable=False, index=True)
+    stage = Column(String(50), nullable=False)  # phone, tech, onsite, offer, …
+    scheduled_at = Column(DateTime, nullable=False)
+    location = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "job_id": self.job_id,
+            "stage": self.stage,
+            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
+            "location": self.location,
+            "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
 
 # Create engine and session

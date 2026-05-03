@@ -20,12 +20,12 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     
     # OpenAI
-    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
+    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o", env="OPENAI_MODEL")
     
     # Google Sheets
     google_sheets_credentials_path: str = Field(
-        default="config/credentials.json", 
+        default="credentials.json", 
         env="GOOGLE_SHEETS_CREDENTIALS_PATH"
     )
     google_sheets_id: Optional[str] = Field(default=None, env="GOOGLE_SHEETS_ID")
@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # Resume Configuration
     resume_file_path: Optional[str] = Field(default=None, env="RESUME_FILE_PATH")
     user_skills: str = Field(default="", env="USER_SKILLS")
+    enable_resume_matching: bool = Field(default=False, env="ENABLE_RESUME_MATCHING")
     
     # Browser Configuration
     browser_headless: bool = Field(default=False, env="BROWSER_HEADLESS")
@@ -79,10 +80,12 @@ settings = Settings()
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent
+DATA_DIR = PROJECT_ROOT / "data"
 LOGS_DIR = PROJECT_ROOT / "logs"
 STATIC_DIR = PROJECT_ROOT / "static"
 
 # Create necessary directories
+DATA_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
 # Logging configuration

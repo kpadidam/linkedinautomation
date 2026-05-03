@@ -80,12 +80,9 @@ class ResumeMatcherService:
         """
         self.resume_profile = resume_profile or ResumeProfile()
         
-        # Initialize AI clients
-        self.openai_client = OpenAI(api_key=settings.openai_api_key)
-        self.groq_client = None
-        
-        if settings.groq_api_key:
-            self.groq_client = Groq(api_key=settings.groq_api_key)
+        # Initialize AI clients (only if keys present — matching is feature-gated)
+        self.openai_client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        self.groq_client = Groq(api_key=settings.groq_api_key) if settings.groq_api_key else None
     
     async def analyze_job_fit(self, job: JobListing) -> JobAnalysis:
         """
@@ -103,10 +100,8 @@ class ResumeMatcherService:
             
             # Use Groq for fast analysis if available, otherwise OpenAI
             if self.groq_client:
-                logger.info("Using Groq for fast AI analysis")
                 analysis = await self._analyze_with_groq(job_context)
             else:
-                logger.info("Using OpenAI for AI analysis")
                 analysis = await self._analyze_with_openai(job_context)
             
             # Update job with match score
@@ -160,21 +155,116 @@ class ResumeMatcherService:
             {job_context}
             
             Provide a detailed analysis in JSON format with:
-            1. technical_skills: List of technical skills required
-            2. soft_skills: List of soft skills required
-            3. tools_technologies: List of tools and technologies mentioned
-            4. certifications: List of required certifications
-            5. overall_match_score: Overall match percentage (0-100)
-            6. skills_match_score: Skills match percentage (0-100)
-            7. experience_match_score: Experience match percentage (0-100)
-            8. missing_skills: Skills the candidate is missing
-            9. matching_skills: Skills the candidate has
-            10. recommendations: List of 3-5 actionable recommendations
-            11. ai_summary: Brief summary of the job (100 words)
-            12. ai_fit_assessment: Assessment of candidate fit (100 words)
-            13. interview_tips: List of 3-5 interview preparation tips
-            
-            Be specific and accurate in your scoring.
+            You are an advanced ATS (Applicant Tracking System) algorithm with deep expertise in resume analysis and candidate matching. Your task is to evaluate a resume against a job description using the exact same multi-stage process that modern ATS systems employ.
+
+**CONTEXT:**
+- Modern ATS systems use NLP, semantic matching, weighted scoring, and machine learning
+- They perform keyword extraction, contextual analysis, and confidence scoring
+- Final output includes match percentage, missing keywords, and optimization recommendations
+
+**INPUT DATA:**
+{job_context}
+
+**ANALYSIS FRAMEWORK:**
+Perform the following stages in order:
+
+**STAGE 1: RESUME PARSING & DATA EXTRACTION**
+- Extract structured data: contact info, work experience, education, skills, certifications
+- Identify formatting quality and ATS-readability issues
+- Flag any parsing problems (graphics, tables, unusual formatting)
+
+**STAGE 2: KEYWORD & SEMANTIC ANALYSIS**
+- Exact keyword matches between resume and job description
+- Semantic matches using contextual understanding (e.g., "managed projects" = "project management")
+- Assign confidence scores (0.0-1.0) for each match
+- Identify critical missing keywords from job requirements
+
+**STAGE 3: WEIGHTED SCORING CALCULATION**
+For each job requirement, assign:
+- Importance weight (1-10 scale based on job posting emphasis)
+- Candidate score (0-10 based on resume evidence)
+- Calculate: (Weight × Score) for each criterion
+
+**STAGE 4: CONTEXTUAL EVALUATION**
+- Years of experience analysis vs requirements
+- Education level matching
+- Industry/domain expertise alignment
+- Leadership/responsibility progression
+- Technical skill depth assessment
+
+**STAGE 5: ATS OPTIMIZATION ANALYSIS**
+- Resume formatting compatibility
+- Section header recognition
+- Bullet point structure
+- Date format consistency
+- File type compatibility
+
+**OUTPUT FORMAT:**
+Provide your analysis in this exact structure:
+
+## ATS MATCH ANALYSIS
+
+**Overall Match Score: X%**
+
+### PARSING RESULTS
+- Contact Information: ✓/✗
+- Work Experience: [X entries parsed]
+- Education: [X entries parsed] 
+- Skills Section: ✓/✗
+- Parsing Issues: [list any problems]
+
+### KEYWORD ANALYSIS
+**Exact Matches (X found):**
+- [keyword] - Found in [section]
+
+**Semantic Matches (X found):**
+- Job Requirement: "[requirement]" → Resume Match: "[match]" (Confidence: 0.XX)
+
+**Critical Missing Keywords (X missing):**
+- [keyword] - Required for [reason]
+- [keyword] - Important because [explanation]
+
+### WEIGHTED SCORING BREAKDOWN
+| Requirement | Weight | Resume Score | Weighted Points |
+|-------------|---------|--------------|-----------------|
+| [requirement] | X/10 | X/10 | XX |
+| [requirement] | X/10 | X/10 | XX |
+**Total: XXX/XXX = XX%**
+
+### EXPERIENCE ALIGNMENT
+- Required Experience: [X years]
+- Candidate Experience: [X years] - ✓/✗
+- Experience Quality: [assessment]
+- Progressive Responsibility: ✓/✗
+
+### ATS OPTIMIZATION SCORE
+- Format Compatibility: X/10
+- Section Structure: X/10
+- Keyword Density: X/10
+- Overall ATS-Friendliness: X/10
+
+### IMPROVEMENT RECOMMENDATIONS
+**High Priority (Immediate Impact):**
+1. [specific actionable recommendation]
+2. [specific actionable recommendation]
+
+**Medium Priority (Additional Optimization):**
+1. [specific recommendation]
+2. [specific recommendation]
+
+**Keyword Integration Suggestions:**
+- Add "[keyword]" to [specific section/context]
+- Replace "[current phrase]" with "[optimized phrase]"
+
+### PREDICTED ATS OUTCOME
+- Likely to pass initial ATS screening: YES/NO
+- Ranking prediction: TOP 10% / TOP 25% / MIDDLE 50% / BOTTOM 25%
+- Human reviewer probability: HIGH/MEDIUM/LOW
+
+**Confidence Level:** XX% (based on data completeness and match quality)
+
+Be extremely specific and actionable in all recommendations. Focus on concrete changes that will improve ATS compatibility and match scoring.
+
             """
             
             response = self.openai_client.chat.completions.create(
@@ -246,8 +336,8 @@ class ResumeMatcherService:
                     {"role": "system", "content": "You are a career advisor. Return only valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1,  # Lower for faster, more consistent results
-                max_tokens=1500  # Reduced for faster response
+                temperature=0.3,
+                max_tokens=2000
             )
             
             # Extract JSON from response

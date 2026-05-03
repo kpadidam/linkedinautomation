@@ -1,6 +1,7 @@
 """FastAPI application for LinkedIn Job Automation System."""
 
 import logging
+import logging.config
 import asyncio
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -9,7 +10,7 @@ import uuid
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -19,7 +20,10 @@ from database.db_manager import db_manager
 from scrapers.linkedin_scraper import LinkedInScraper, JobSearchParams
 from services.google_sheets_service import GoogleSheetsService
 from services.resume_matcher import ResumeMatcherService, ResumeProfile
+from services.session_manager import SessionManager
 from models.job_model import JobListing, JobStatus
+import os as _os
+session_manager = SessionManager(project_root=_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 # Configure logging
 logging.config.dictConfig(LOGGING_CONFIG)
@@ -73,9 +77,10 @@ class JobSearchResponse(BaseModel):
 
 
 class JobUpdateRequest(BaseModel):
-    """Request model for updating job status."""
-    status: str
+    """Request model for updating job status, notes, and labels."""
+    status: Optional[str] = None
     notes: Optional[str] = None
+    labels: Optional[List[str]] = None
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -85,6 +90,7 @@ class ProfileUpdateRequest(BaseModel):
     resume_text: Optional[str] = None
     skills: Optional[List[str]] = None
     preferred_locations: Optional[List[str]] = None
+    search_roles: Optional[List[str]] = None
 
 
 @app.on_event("startup")
@@ -205,8 +211,8 @@ async def perform_job_search(search_id: str, params: Dict[str, Any]):
                 # Create JobListing object
                 job_listing = JobListing(**job_data)
                 
-                # Perform resume matching if enabled
-                if params.get("enable_matching") and resume_matcher_service:
+                # Perform resume matching if enabled (also requires global feature flag)
+                if settings.enable_resume_matching and params.get("enable_matching") and resume_matcher_service:
                     analysis = await resume_matcher_service.analyze_job_fit(job_listing)
                     job_listing.resume_match_score = analysis.overall_match_score
                     job_listing.keywords = analysis.technical_skills + analysis.soft_skills
@@ -290,24 +296,24 @@ async def update_job(
     request: JobUpdateRequest,
     db: Session = Depends(get_db)
 ):
-    """Update job status and notes."""
-    success = db_manager.update_job_status(job_id, request.status, db)
-    
-    if not success:
+    """Update job status, notes, and/or labels (any subset)."""
+    job = db_manager.get_job_by_id(job_id, db)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    # Update notes if provided
-    if request.notes:
-        job = db_manager.get_job_by_id(job_id, db)
+
+    if request.status is not None:
+        job.status = request.status
+        if request.status == "applied":
+            job.applied = True
+            job.applied_date = datetime.utcnow()
+    if request.notes is not None:
         job.notes = request.notes
-        db.commit()
-    
-    # Update Google Sheets if available
-    if google_sheets_service:
-        # Find row number and update (simplified - would need proper implementation)
-        pass
-    
-    return {"status": "success", "message": f"Job {job_id} updated"}
+    if request.labels is not None:
+        job.tags = request.labels
+
+    db.commit()
+    db.refresh(job)
+    return {"status": "success", "job": job.to_dict()}
 
 
 @app.get("/api/profile")
@@ -319,6 +325,7 @@ async def get_profile(db: Session = Depends(get_db)):
         "email": profile.email,
         "skills": profile.skills,
         "preferred_locations": profile.preferred_locations,
+        "search_roles": profile.search_roles,
         "auto_search_enabled": profile.auto_search_enabled
     }
 
@@ -401,6 +408,131 @@ async def cleanup_old_data(
         "deleted_records": deleted,
         "message": f"Cleaned up {deleted} records older than {days} days"
     }
+
+
+# ============================================================
+# Session control + log streaming
+# ============================================================
+
+@app.get("/api/sessions/status")
+async def session_status():
+    return session_manager.status()
+
+
+@app.post("/api/sessions/start")
+async def session_start():
+    return await session_manager.start()
+
+
+@app.post("/api/sessions/stop")
+async def session_stop():
+    return await session_manager.stop()
+
+
+@app.get("/api/sessions/logs/stream")
+async def session_logs_stream():
+    async def event_generator():
+        async for line in session_manager.stream():
+            yield f"data: {line}\n\n"
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# ============================================================
+# Followups + Interview events
+# ============================================================
+from database.models import Followup, InterviewEvent
+
+class FollowupCreate(BaseModel):
+    job_id: str
+    due_at: datetime
+    note: Optional[str] = None
+
+class FollowupUpdate(BaseModel):
+    due_at: Optional[datetime] = None
+    note: Optional[str] = None
+    done: Optional[bool] = None
+
+class InterviewCreate(BaseModel):
+    job_id: str
+    stage: str
+    scheduled_at: datetime
+    location: Optional[str] = None
+    notes: Optional[str] = None
+
+class InterviewUpdate(BaseModel):
+    stage: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
+    location: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@app.get("/api/followups")
+async def list_followups(job_id: Optional[str] = None, db: Session = Depends(get_db)):
+    q = db.query(Followup)
+    if job_id:
+        q = q.filter(Followup.job_id == job_id)
+    return [f.to_dict() for f in q.order_by(Followup.due_at.asc()).all()]
+
+
+@app.post("/api/followups")
+async def create_followup(payload: FollowupCreate, db: Session = Depends(get_db)):
+    f = Followup(job_id=payload.job_id, due_at=payload.due_at, note=payload.note, done=False)
+    db.add(f); db.commit(); db.refresh(f)
+    return f.to_dict()
+
+
+@app.put("/api/followups/{fid}")
+async def update_followup(fid: int, payload: FollowupUpdate, db: Session = Depends(get_db)):
+    f = db.query(Followup).filter(Followup.id == fid).first()
+    if not f: raise HTTPException(404, "Followup not found")
+    for k, v in payload.dict(exclude_unset=True).items():
+        setattr(f, k, v)
+    db.commit(); db.refresh(f)
+    return f.to_dict()
+
+
+@app.delete("/api/followups/{fid}")
+async def delete_followup(fid: int, db: Session = Depends(get_db)):
+    f = db.query(Followup).filter(Followup.id == fid).first()
+    if not f: raise HTTPException(404, "Followup not found")
+    db.delete(f); db.commit()
+    return {"status": "deleted"}
+
+
+@app.get("/api/interviews")
+async def list_interviews(job_id: Optional[str] = None, db: Session = Depends(get_db)):
+    q = db.query(InterviewEvent)
+    if job_id:
+        q = q.filter(InterviewEvent.job_id == job_id)
+    return [e.to_dict() for e in q.order_by(InterviewEvent.scheduled_at.asc()).all()]
+
+
+@app.post("/api/interviews")
+async def create_interview(payload: InterviewCreate, db: Session = Depends(get_db)):
+    e = InterviewEvent(
+        job_id=payload.job_id, stage=payload.stage,
+        scheduled_at=payload.scheduled_at, location=payload.location, notes=payload.notes,
+    )
+    db.add(e); db.commit(); db.refresh(e)
+    return e.to_dict()
+
+
+@app.put("/api/interviews/{eid}")
+async def update_interview(eid: int, payload: InterviewUpdate, db: Session = Depends(get_db)):
+    e = db.query(InterviewEvent).filter(InterviewEvent.id == eid).first()
+    if not e: raise HTTPException(404, "Interview not found")
+    for k, v in payload.dict(exclude_unset=True).items():
+        setattr(e, k, v)
+    db.commit(); db.refresh(e)
+    return e.to_dict()
+
+
+@app.delete("/api/interviews/{eid}")
+async def delete_interview(eid: int, db: Session = Depends(get_db)):
+    e = db.query(InterviewEvent).filter(InterviewEvent.id == eid).first()
+    if not e: raise HTTPException(404, "Interview not found")
+    db.delete(e); db.commit()
+    return {"status": "deleted"}
 
 
 if __name__ == "__main__":

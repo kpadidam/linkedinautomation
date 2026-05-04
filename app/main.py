@@ -674,6 +674,12 @@ async def update_settings(
 
     Empty-string for any secret field clears the DB value (so the .env
     fallback takes effect again). null leaves it untouched.
+
+    Side-effect: toggling auto_search_enabled OFF→ON resets the cadence
+    baseline (``last_auto_search = now``). Without this, the countdown
+    just resumes where it was when the user paused — re-enabling 5min
+    after disabling with 10min left would fire 5min later instead of
+    starting a fresh window.
     """
     updates = request.dict(exclude_unset=True)
     # Normalize secret-clearing: empty strings → None so DB stores NULL.
@@ -681,6 +687,13 @@ async def update_settings(
     for k in SECRET_KEYS:
         if k in updates and updates[k] == "":
             updates[k] = None
+
+    # Detect OFF→ON edge on the auto-search toggle BEFORE applying updates.
+    if updates.get("auto_search_enabled") is True:
+        prev = db_manager.get_or_create_user_profile(db)
+        if not prev.auto_search_enabled:
+            updates["last_auto_search"] = datetime.utcnow()
+
     if updates:
         success = db_manager.update_user_profile(db, **updates)
         if not success:

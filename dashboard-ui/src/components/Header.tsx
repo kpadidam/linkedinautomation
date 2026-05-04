@@ -10,10 +10,8 @@ import {
   FiSkipForward,
   FiClock,
   FiZap,
-  FiSettings,
-  FiCalendar,
 } from 'react-icons/fi'
-import { Link, NavLink } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import {
   useSessionStatus,
@@ -253,37 +251,6 @@ export function Header() {
             ) : null}
           </>
         )}
-        <span className="w-px h-6 bg-zinc-200 dark:bg-zinc-800 mx-1" aria-hidden />
-        <NavLink
-          to="/calendar"
-          className={({ isActive }) =>
-            cn(
-              'inline-flex items-center justify-center h-8 w-8 rounded-md transition-colors',
-              isActive
-                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-50',
-            )
-          }
-          aria-label="Calendar"
-          title="Calendar"
-        >
-          <FiCalendar className="h-4 w-4" />
-        </NavLink>
-        <NavLink
-          to="/settings"
-          className={({ isActive }) =>
-            cn(
-              'inline-flex items-center justify-center h-8 w-8 rounded-md transition-colors',
-              isActive
-                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-50',
-            )
-          }
-          aria-label="Settings"
-          title="Settings"
-        >
-          <FiSettings className="h-4 w-4" />
-        </NavLink>
         <button
           className="btn-ghost !p-1.5"
           onClick={toggle}

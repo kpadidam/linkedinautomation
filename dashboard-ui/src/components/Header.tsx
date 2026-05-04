@@ -9,8 +9,11 @@ import {
   FiRefreshCw,
   FiSkipForward,
   FiClock,
+  FiZap,
+  FiSettings,
+  FiCalendar,
 } from 'react-icons/fi'
-import { Link } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import {
   useSessionStatus,
@@ -66,14 +69,16 @@ export function Header() {
   const canResumeFromCheckpoint = !running && !!pending
   const setupBlocked = !!setup && !setup.complete
 
-  // Live elapsed timer — ticks once per second so the header reads like a
-  // stopwatch even though the underlying status query refetches every 2s.
+  // Live ticker — drives both the running stopwatch and the idle
+  // "next trigger in Xh Ym" countdown, so we tick whenever there's
+  // something time-sensitive on screen.
+  const hasNextTrigger = !!status?.next_trigger
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (!running) return
+    if (!running && !hasNextTrigger) return
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
-  }, [running])
+  }, [running, hasNextTrigger])
 
   const startedAtMs = status?.started_at ? new Date(status.started_at).getTime() : null
   const pausedAtMs = status?.paused_at ? new Date(status.paused_at).getTime() : null
@@ -111,6 +116,10 @@ export function Header() {
   else if (running) dotClass = 'bg-emerald-500 animate-pulse'
   else if (canResumeFromCheckpoint) dotClass = 'bg-amber-500'
 
+  // Idle copy is trigger-aware: when auto-search is on we show a live
+  // "next trigger in Xh Ym" countdown (re-derived each tick from now() vs
+  // the server's `next_at` ISO so it stays accurate without polling).
+  const trigger = status?.next_trigger ?? null
   let statusLine: React.ReactNode = 'Idle'
   if (running && paused) {
     statusLine = (
@@ -133,8 +142,20 @@ export function Header() {
         started {fmtClock(pending!.started_at)}
       </>
     )
-  } else if (status?.exit_code != null) {
-    statusLine = `Idle · last exit ${status.exit_code}`
+  } else if (trigger) {
+    const secsUntil = Math.max(
+      0,
+      Math.floor((new Date(trigger.next_at).getTime() - now) / 1000),
+    )
+    statusLine = (
+      <>
+        <FiZap className="h-3.5 w-3.5 opacity-70 shrink-0" />
+        Trigger every {trigger.frequency_hours}h · next in{' '}
+        <span className="font-mono tabular-nums">{fmtElapsed(secsUntil)}</span>
+      </>
+    )
+  } else {
+    statusLine = 'Trigger: manual only'
   }
 
   return (
@@ -225,7 +246,43 @@ export function Header() {
             ) : null}
           </>
         )}
-        <button className="btn-ghost" onClick={toggle} aria-label="Toggle theme">
+        <span className="w-px h-6 bg-zinc-200 dark:bg-zinc-800 mx-1" aria-hidden />
+        <NavLink
+          to="/calendar"
+          className={({ isActive }) =>
+            cn(
+              'inline-flex items-center justify-center h-8 w-8 rounded-md transition-colors',
+              isActive
+                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-50',
+            )
+          }
+          aria-label="Calendar"
+          title="Calendar"
+        >
+          <FiCalendar className="h-4 w-4" />
+        </NavLink>
+        <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            cn(
+              'inline-flex items-center justify-center h-8 w-8 rounded-md transition-colors',
+              isActive
+                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-50',
+            )
+          }
+          aria-label="Settings"
+          title="Settings"
+        >
+          <FiSettings className="h-4 w-4" />
+        </NavLink>
+        <button
+          className="btn-ghost !p-1.5"
+          onClick={toggle}
+          aria-label="Toggle theme"
+          title="Toggle theme"
+        >
           {theme === 'dark' ? <FiSun className="h-4 w-4" /> : <FiMoon className="h-4 w-4" />}
         </button>
       </div>

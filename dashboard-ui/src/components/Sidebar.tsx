@@ -1,14 +1,14 @@
 import { NavLink } from 'react-router-dom'
-import { FiGrid, FiInbox, FiTrello, FiCalendar, FiActivity, FiSettings } from 'react-icons/fi'
+import { FiGrid, FiInbox, FiTrello, FiActivity } from 'react-icons/fi'
 import { cn } from '@/lib/utils'
 
+// Calendar + Settings live in the header's right rail (utility nav).
+// The sidebar is reserved for working surfaces.
 const links = [
   { to: '/', icon: FiGrid, label: 'Dashboard', end: true },
   { to: '/review-queue', icon: FiInbox, label: 'Review Queue' },
   { to: '/pipeline', icon: FiTrello, label: 'Pipeline' },
-  { to: '/calendar', icon: FiCalendar, label: 'Calendar' },
   { to: '/session', icon: FiActivity, label: 'Session' },
-  { to: '/settings', icon: FiSettings, label: 'Settings' },
 ]
 
 export function Sidebar() {

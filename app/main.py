@@ -4,7 +4,7 @@ import logging
 import logging.config
 import asyncio
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query
@@ -157,6 +157,55 @@ def _run_sqlite_migrations() -> None:
         logger.warning(f"SQLite migration helper failed: {outer}")
 
 
+async def _auto_search_loop():
+    """Lightweight scheduler — fires session_manager.start() when auto-search
+    is enabled and ``last_auto_search + frequency_hours`` is past, provided
+    the scraper isn't already running. Sleeps 60s between checks.
+
+    Intentionally tiny — no per-second timers, no separate process. If the
+    user toggles auto-search off, the very next tick stops triggering.
+    Setup-incomplete and currently-running cases are no-ops so the loop
+    never fights with manual control.
+    """
+    while True:
+        try:
+            await asyncio.sleep(60)
+            if session_manager.is_running:
+                continue
+            db = next(get_db())
+            try:
+                profile = db_manager.get_or_create_user_profile(db)
+                if not profile.auto_search_enabled:
+                    continue
+                # Don't auto-trigger when setup is incomplete; user would just
+                # see a 400 from session_manager.start anyway. Defer until
+                # they finish setup.
+                if not _setup_doc(db)["complete"]:
+                    continue
+                freq_h = int(profile.search_frequency_hours or 24)
+                last = profile.last_auto_search
+                due = last is None or (
+                    datetime.utcnow() - last >= timedelta(hours=freq_h)
+                )
+                if not due:
+                    continue
+                logger.info(
+                    f"Auto-trigger firing (last={last}, frequency={freq_h}h)"
+                )
+                profile.last_auto_search = datetime.utcnow()
+                db.commit()
+                await session_manager.start()
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"auto-search loop tick failed: {e}")
+
+
+_auto_search_task: Optional[asyncio.Task] = None
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
@@ -180,8 +229,12 @@ async def startup_event():
         resume_matcher_service = ResumeMatcherService()
         logger.info("Resume matcher service initialized")
         
+        # Kick off the auto-search scheduler (no-op if user has it disabled).
+        global _auto_search_task
+        _auto_search_task = asyncio.create_task(_auto_search_loop())
+
         logger.info(f"{settings.app_name} started successfully")
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
 
@@ -670,6 +723,31 @@ async def cleanup_old_data(
 # Session control + log streaming
 # ============================================================
 
+def _next_trigger_payload(db: Session) -> Optional[Dict[str, Any]]:
+    """Compute when the auto-search scheduler will fire next.
+
+    Returns ``None`` when auto-search is disabled. Otherwise reports the
+    target ISO datetime + remaining seconds. If ``last_auto_search`` is
+    null (never run), targets ``now + frequency_hours`` so the first
+    trigger is one full window from boot.
+    """
+    profile = db_manager.get_or_create_user_profile(db)
+    if not profile.auto_search_enabled:
+        return None
+    freq_h = int(profile.search_frequency_hours or 24)
+    base = profile.last_auto_search or datetime.utcnow()
+    next_at = base + timedelta(hours=freq_h)
+    secs = (next_at - datetime.utcnow()).total_seconds()
+    return {
+        "next_at": next_at.isoformat(),
+        "frequency_hours": freq_h,
+        "seconds_until": int(secs),
+        "last_run_at": (
+            profile.last_auto_search.isoformat() if profile.last_auto_search else None
+        ),
+    }
+
+
 def _pending_progress_payload(db: Session) -> Optional[Dict[str, Any]]:
     """Return resumable-checkpoint info if a partial run is on file, else None.
 
@@ -708,6 +786,7 @@ def _pending_progress_payload(db: Session) -> Optional[Dict[str, Any]]:
 async def session_status(db: Session = Depends(get_db)):
     base = session_manager.status()
     base["pending_progress"] = _pending_progress_payload(db)
+    base["next_trigger"] = _next_trigger_payload(db)
     return base
 
 

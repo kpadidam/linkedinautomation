@@ -87,7 +87,15 @@ class SessionManager:
         self.pause_duration_seconds = 0.0
         self.log_buffer.clear()
         self._reader_task = asyncio.create_task(self._read_output())
-        self._broadcast(f"[session] started pid={self.process.pid} script={script}")
+        # Visual divider so the live log clearly shows where each run begins.
+        bar = "═" * 60
+        self._broadcast("")
+        self._broadcast(bar)
+        self._broadcast(
+            f"  SESSION STARTED  ·  pid {self.process.pid}  ·  "
+            f"{self.started_at.strftime('%H:%M:%S')} UTC  ·  script={script}"
+        )
+        self._broadcast(bar)
         return {"status": "started", **self.status()}
 
     async def pause(self) -> dict:
@@ -154,8 +162,30 @@ class SessionManager:
         except ProcessLookupError:
             pass
         self.exit_code = self.process.returncode
-        self._broadcast(f"[session] stopped exit_code={self.exit_code}")
+        self._broadcast_stop_banner("STOPPED")
         return {"status": "stopped", **self.status()}
+
+    def _broadcast_stop_banner(self, kind: str):
+        bar = "═" * 60
+        active = ""
+        if self.started_at:
+            wall = (datetime.utcnow() - self.started_at).total_seconds()
+            active_s = max(0, wall - self.pause_duration_seconds)
+            mins, secs = divmod(int(active_s), 60)
+            hours, mins = divmod(mins, 60)
+            if hours:
+                active = f"  ·  ran {hours}h {mins}m {secs}s"
+            elif mins:
+                active = f"  ·  ran {mins}m {secs}s"
+            else:
+                active = f"  ·  ran {secs}s"
+        self._broadcast("")
+        self._broadcast(bar)
+        self._broadcast(
+            f"  SESSION {kind}  ·  exit {self.exit_code}{active}"
+        )
+        self._broadcast(bar)
+        self._broadcast("")
 
     async def _read_output(self):
         assert self.process and self.process.stdout
@@ -169,7 +199,14 @@ class SessionManager:
         finally:
             await self.process.wait()
             self.exit_code = self.process.returncode
-            self._broadcast(f"[session] process exited code={self.exit_code}")
+            # Don't double-banner if the user explicitly Stopped (stop() already
+            # printed the banner). We can detect that by checking pause state +
+            # whether a banner was already printed; simplest heuristic: emit a
+            # banner only when the process exited on its own (not via SIGTERM).
+            # SIGTERM exits with negative -15 on POSIX. If exit code is 0 or
+            # something unexpected, emit a banner so the user sees clear EOF.
+            if self.exit_code != -15:
+                self._broadcast_stop_banner("EXITED")
 
     def _broadcast(self, line: str):
         ts = datetime.utcnow().strftime("%H:%M:%S")

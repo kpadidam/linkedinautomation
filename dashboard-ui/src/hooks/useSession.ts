@@ -9,6 +9,13 @@ export interface PendingProgress {
   age_hours: number
 }
 
+export interface NextTrigger {
+  next_at: string            // ISO datetime
+  frequency_hours: number
+  seconds_until: number      // negative if overdue
+  last_run_at: string | null
+}
+
 export interface SessionStatus {
   running: boolean
   paused: boolean
@@ -19,6 +26,7 @@ export interface SessionStatus {
   exit_code: number | null
   log_count: number
   pending_progress: PendingProgress | null
+  next_trigger: NextTrigger | null
 }
 
 export function useSessionStatus() {

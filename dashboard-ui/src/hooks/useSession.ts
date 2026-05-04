@@ -2,12 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { clearSettingsDirty } from '@/lib/settingsDirty'
 
+export interface PendingProgress {
+  completed_index: number    // index of last fully-completed category (0-based)
+  total_categories: number
+  started_at: string         // ISO datetime when run originally started
+  age_hours: number
+}
+
 export interface SessionStatus {
   running: boolean
   pid: number | null
   started_at: string | null
   exit_code: number | null
   log_count: number
+  pending_progress: PendingProgress | null
 }
 
 export function useSessionStatus() {
@@ -40,6 +48,21 @@ export function useStopSession() {
   return useMutation({
     mutationFn: async () => {
       const r = await fetch('/api/sessions/stop', { method: 'POST' })
+      return r.json()
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),
+  })
+}
+
+export function useResetSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const r = await fetch('/api/sessions/reset', { method: 'POST' })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        throw new Error(err.detail || `${r.status} ${r.statusText}`)
+      }
       return r.json()
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),

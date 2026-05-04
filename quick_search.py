@@ -7,6 +7,7 @@ Searches all configured job categories and logs to Google Sheets
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 
@@ -51,6 +52,9 @@ class JobSearchAutomation:
         user_location = "United States"
         # Default to env-level setting; DB override applied below.
         self.enable_resume_matching = settings.enable_resume_matching
+        # Resumable-checkpoint state (Option A). 0 means start from scratch.
+        self.resume_from_index = 0
+        self.checkpoint_started_at = None
         try:
             from database.models import SessionLocal
             from database.db_manager import db_manager
@@ -63,6 +67,21 @@ class JobSearchAutomation:
                 # Pull persisted feature flag (UI-editable). Fallback to env.
                 if profile.enable_resume_matching is not None:
                     self.enable_resume_matching = bool(profile.enable_resume_matching)
+
+                # Honor checkpoint only if fresh (<24h). Stale = reset.
+                idx = profile.last_completed_category_index
+                started = profile.pending_search_started_at
+                if (
+                    idx is not None and idx >= 0
+                    and started is not None
+                    and (datetime.utcnow() - started) < timedelta(hours=24)
+                ):
+                    self.resume_from_index = idx + 1
+                    self.checkpoint_started_at = started
+                else:
+                    profile.last_completed_category_index = -1
+                    profile.pending_search_started_at = None
+                    db.commit()
             finally:
                 db.close()
         except Exception as e:
@@ -87,24 +106,87 @@ class JobSearchAutomation:
                 self.job_config = json.load(f)
             logger.info(f"Loaded {len(self.job_config['job_categories'])} job categories from job_search_config.json")
 
+        if self.resume_from_index > 0:
+            total = len(self.job_config['job_categories'])
+            logger.info(
+                f"📌 Resuming from category {self.resume_from_index + 1} of {total} "
+                f"(checkpoint @ {self.checkpoint_started_at})"
+            )
+
         logger.info(f"Profile: {self.skills_profile['name']} - {self.skills_profile['title']}")
     
     async def run_all_searches(self):
         """Run searches for all configured categories using Playwright scraper."""
+        all_categories = self.job_config['job_categories']
+        total = len(all_categories)
+        start_idx = self.resume_from_index
+        remaining = all_categories[start_idx:]
+
         print("\n" + "="*60)
         print("🚀 LinkedIn Job Search Automation")
         print(f"👤 Profile: {self.skills_profile['name']}")
-        print(f"📍 Categories: {len(self.job_config['job_categories'])}")
+        if start_idx > 0:
+            print(f"📍 Resuming: category {start_idx + 1} of {total} (skipping {start_idx} already done)")
+        else:
+            print(f"📍 Categories: {total}")
         print("="*60)
-        
+
+        # Persist a fresh start timestamp only if this is NOT a resume.
+        # On resume, we keep the original timestamp so the 24h freshness
+        # window is measured from the very first start of the run.
+        from database.models import SessionLocal
+        from database.db_manager import db_manager
+        if start_idx == 0:
+            try:
+                db = SessionLocal()
+                try:
+                    profile = db_manager.get_or_create_user_profile(db)
+                    profile.last_completed_category_index = -1
+                    profile.pending_search_started_at = datetime.utcnow()
+                    db.commit()
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(f"Could not stamp pending_search_started_at: {e}")
+
+        async def _checkpoint(rel_idx, _category):
+            """Persist absolute completed-category index after each one."""
+            absolute_idx = start_idx + rel_idx
+            try:
+                db = SessionLocal()
+                try:
+                    profile = db_manager.get_or_create_user_profile(db)
+                    profile.last_completed_category_index = absolute_idx
+                    db.commit()
+                    logger.info(f"📌 Checkpoint: completed {absolute_idx + 1}/{total}")
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(f"Checkpoint write failed: {e}")
+
         try:
             # Initialize the Robust LinkedIn scraper with DB-driven flags
             scraper = RobustLinkedInScraper(
                 enable_resume_matching=self.enable_resume_matching
             )
-            
-            # Run full search with all categories
-            all_jobs = await scraper.run_full_search(self.job_config['job_categories'])
+
+            # Run search over the remaining (unfinished) categories
+            all_jobs = await scraper.run_full_search(
+                remaining, on_category_complete=_checkpoint
+            )
+
+            # Successful completion → clear checkpoint so next run is fresh.
+            try:
+                db = SessionLocal()
+                try:
+                    profile = db_manager.get_or_create_user_profile(db)
+                    profile.last_completed_category_index = -1
+                    profile.pending_search_started_at = None
+                    db.commit()
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(f"Could not clear checkpoint after completion: {e}")
             
             self.total_jobs_found = len(all_jobs)
             self.total_jobs_matched = len([j for j in all_jobs if j.get('resume_match_score', 0) >= 70])

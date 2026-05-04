@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { FiPlay, FiSquare, FiTrash2, FiPause, FiActivity } from 'react-icons/fi'
+import { FiTrash2, FiPause, FiActivity } from 'react-icons/fi'
 import { cn } from '@/lib/utils'
-import { useLogStream, useSessionStatus, useStartSession, useStopSession } from '@/hooks/useSession'
+import { useLogStream, useSessionStatus } from '@/hooks/useSession'
 
 export default function SessionScreen() {
   const { data: status } = useSessionStatus()
-  const start = useStartSession()
-  const stop = useStopSession()
   const [autoscroll, setAutoscroll] = useState(true)
   const { lines, clear } = useLogStream(true)
   const endRef = useRef<HTMLDivElement>(null)
@@ -19,30 +17,18 @@ export default function SessionScreen() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 h-full flex flex-col">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
-            <FiActivity className="h-5 w-5" /> Session
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {running
-              ? `Running · pid ${status?.pid} · started ${status?.started_at?.slice(11, 19)}`
-              : status?.exit_code != null
-                ? `Idle · last exit ${status.exit_code}`
-                : 'Idle'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {running ? (
-            <button className="btn-danger" onClick={() => stop.mutate()} disabled={stop.isPending}>
-              <FiSquare className="h-4 w-4" /> Stop session
-            </button>
-          ) : (
-            <button className="btn-primary" onClick={() => start.mutate()} disabled={start.isPending}>
-              <FiPlay className="h-4 w-4" /> Start session
-            </button>
-          )}
-        </div>
+      <div>
+        <h1 className="text-xl font-semibold flex items-center gap-2">
+          <FiActivity className="h-5 w-5" /> Session
+        </h1>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          {running
+            ? `Running · pid ${status?.pid} · started ${status?.started_at?.slice(11, 19)}`
+            : status?.exit_code != null
+              ? `Idle · last exit ${status.exit_code}`
+              : 'Idle'}
+          <span className="ml-2 text-xs text-zinc-400">· controls in header</span>
+        </p>
       </div>
 
       <div className="surface rounded-lg flex-1 flex flex-col overflow-hidden">

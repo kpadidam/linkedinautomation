@@ -800,17 +800,27 @@ class RobustLinkedInScraper:
             logger.error(f"Too many errors ({self.error_count}), aborting")
             raise Exception(f"Maximum error count ({self.max_errors}) exceeded")
     
-    async def run_full_search(self, job_categories: List[Dict[str, Any]]):
+    async def run_full_search(
+        self,
+        job_categories: List[Dict[str, Any]],
+        on_category_complete=None,
+    ):
         """
         Run full search for all job categories with robust error handling.
+
+        Args:
+            job_categories: list of category dicts to process.
+            on_category_complete: optional async callable invoked after each
+                category finishes. Receives ``(relative_index, category)`` so
+                callers can checkpoint resumable progress.
         """
         try:
             await self.initialize()
             await self.login()
-            
+
             all_jobs = []
-            
-            for category in job_categories:
+
+            for cat_idx, category in enumerate(job_categories):
                 logger.info(f"\n{'='*60}")
                 logger.info(f"Processing category: {category['category']}")
                 logger.info(f"{'='*60}")
@@ -879,7 +889,15 @@ class RobustLinkedInScraper:
                 
                 all_jobs.extend(category_jobs)
                 logger.info(f"Category '{category['category']}' total: {len(category_jobs)} jobs")
-                
+
+                # Fire checkpoint callback so the caller can persist progress
+                # before we move on to the next category.
+                if on_category_complete is not None:
+                    try:
+                        await on_category_complete(cat_idx, category)
+                    except Exception as cb_err:  # noqa: BLE001
+                        logger.warning(f"on_category_complete callback failed: {cb_err}")
+
                 # Delay between categories
                 await asyncio.sleep(random.uniform(5, 10))
             

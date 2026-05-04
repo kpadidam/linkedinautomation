@@ -123,6 +123,8 @@ def _run_sqlite_migrations() -> None:
         ("user_profile", "enable_resume_matching", "BOOLEAN DEFAULT 1"),
         ("user_profile", "headless_browser", "BOOLEAN DEFAULT 1"),
         ("user_profile", "browser_timeout", "INTEGER DEFAULT 30000"),
+        ("user_profile", "last_completed_category_index", "INTEGER DEFAULT -1"),
+        ("user_profile", "pending_search_started_at", "DATETIME"),
         ("interview_events", "interviewer_tz", "VARCHAR(64)"),
     ]
     try:
@@ -524,9 +526,45 @@ async def cleanup_old_data(
 # Session control + log streaming
 # ============================================================
 
+def _pending_progress_payload(db: Session) -> Optional[Dict[str, Any]]:
+    """Return resumable-checkpoint info if a partial run is on file, else None.
+
+    A pending run is one where last_completed_category_index >= 0 AND its
+    timestamp is fresh enough to still be useful (24h window). The total
+    category count comes from search_roles (or job_search_config.json fallback)
+    so we can render "Resume from category X of N".
+    """
+    profile = db_manager.get_or_create_user_profile(db)
+    idx = profile.last_completed_category_index
+    started = profile.pending_search_started_at
+    if idx is None or idx < 0 or not started:
+        return None
+    age_hours = (datetime.utcnow() - started).total_seconds() / 3600
+    if age_hours > 24:
+        return None
+    roles = list(profile.search_roles or [])
+    total = len(roles) if roles else 0
+    if total == 0:
+        # Fall back to file config so we still report a meaningful total.
+        try:
+            import json as _json
+            with open("job_search_config.json", "r") as f:
+                total = len(_json.load(f).get("job_categories", []))
+        except Exception:  # noqa: BLE001
+            total = 0
+    return {
+        "completed_index": idx,
+        "total_categories": total,
+        "started_at": started.isoformat(),
+        "age_hours": round(age_hours, 1),
+    }
+
+
 @app.get("/api/sessions/status")
-async def session_status():
-    return session_manager.status()
+async def session_status(db: Session = Depends(get_db)):
+    base = session_manager.status()
+    base["pending_progress"] = _pending_progress_payload(db)
+    return base
 
 
 @app.post("/api/sessions/start")
@@ -537,6 +575,24 @@ async def session_start():
 @app.post("/api/sessions/stop")
 async def session_stop():
     return await session_manager.stop()
+
+
+@app.post("/api/sessions/reset")
+async def session_reset(db: Session = Depends(get_db)):
+    """Clear the resumable checkpoint so the next Start runs from scratch.
+
+    Refuses while a session is currently running — caller should Stop first.
+    """
+    if session_manager.is_running:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reset progress while session is running. Stop first.",
+        )
+    profile = db_manager.get_or_create_user_profile(db)
+    profile.last_completed_category_index = -1
+    profile.pending_search_started_at = None
+    db.commit()
+    return {"status": "reset"}
 
 
 @app.get("/api/sessions/logs/stream")

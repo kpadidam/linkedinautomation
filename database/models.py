@@ -207,6 +207,14 @@ class UserProfile(Base):
     headless_browser = Column(Boolean, default=True)
     browser_timeout = Column(Integer, default=30000)
 
+    # Resumable scraper progress (Option A: checkpoint per category).
+    # last_completed_category_index is -1 when no run is in flight; otherwise
+    # the index of the last fully-finished category in the most recent
+    # search_roles list. pending_search_started_at marks when this in-flight
+    # run began so the UI/scraper can ignore stale checkpoints.
+    last_completed_category_index = Column(Integer, default=-1)
+    pending_search_started_at = Column(DateTime, nullable=True)
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

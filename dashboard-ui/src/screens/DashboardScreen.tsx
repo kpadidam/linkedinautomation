@@ -165,22 +165,52 @@ export default function DashboardScreen() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard label="New jobs" value={newRecent} icon={FiInbox} hint="last 24h" />
+        <StatCard
+          label="New jobs"
+          value={newRecent}
+          icon={FiInbox}
+          hint="last 24h"
+          to="/review-queue"
+          title="Open Review Queue"
+        />
         {matchingEnabled ? (
-          <StatCard label="High matches" value={stats?.high_match_jobs ?? 0} icon={FiActivity} hint={`≥ ${HIGH_MATCH}%`} />
+          <StatCard
+            label="High matches"
+            value={stats?.high_match_jobs ?? 0}
+            icon={FiActivity}
+            hint={`≥ ${HIGH_MATCH}%`}
+            to={`/review-queue?min_score=${HIGH_MATCH}`}
+            title="Filter Review Queue to high-match jobs"
+          />
         ) : null}
-        <StatCard label="Saved" value={counts.saved} icon={FiBookmark} />
-        <StatCard label="Applied" value={counts.applied} icon={FiSend} />
+        <StatCard
+          label="Saved"
+          value={counts.saved}
+          icon={FiBookmark}
+          to="/pipeline"
+          title="Open Pipeline (Saved column)"
+        />
+        <StatCard
+          label="Applied"
+          value={counts.applied}
+          icon={FiSend}
+          to="/pipeline"
+          title="Open Pipeline (Applied column)"
+        />
         <StatCard
           label="Interviews"
           value={counts.recruiter_screen + counts.technical_interview + counts.final}
           icon={FiCalendar}
+          to="/calendar"
+          title="Open Calendar"
         />
         {matchingEnabled ? (
           <StatCard
             label="Avg match"
             value={stats?.average_match_score != null ? `${Math.round(stats.average_match_score)}%` : '—'}
             icon={FiPercent}
+            to="/review-queue"
+            title="Open Review Queue"
           />
         ) : null}
       </div>

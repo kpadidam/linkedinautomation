@@ -4,7 +4,22 @@ import logging
 import logging.config
 import asyncio
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+
+def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """Serialize a naive UTC datetime as an ISO string the browser will
+    correctly parse as UTC. ``datetime.utcnow().isoformat()`` produces
+    a naive string with no offset; JavaScript's ``new Date()`` then
+    interprets it as LOCAL time, which silently shifts every timestamp
+    by the client's timezone offset. Always go through this helper for
+    any datetime sent to the frontend.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 import uuid
 
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query
@@ -739,12 +754,10 @@ def _next_trigger_payload(db: Session) -> Optional[Dict[str, Any]]:
     next_at = base + timedelta(hours=freq_h)
     secs = (next_at - datetime.utcnow()).total_seconds()
     return {
-        "next_at": next_at.isoformat(),
+        "next_at": _utc_iso(next_at),
         "frequency_hours": freq_h,
         "seconds_until": int(secs),
-        "last_run_at": (
-            profile.last_auto_search.isoformat() if profile.last_auto_search else None
-        ),
+        "last_run_at": _utc_iso(profile.last_auto_search),
     }
 
 
@@ -777,7 +790,7 @@ def _pending_progress_payload(db: Session) -> Optional[Dict[str, Any]]:
     return {
         "completed_index": idx,
         "total_categories": total,
-        "started_at": started.isoformat(),
+        "started_at": _utc_iso(started),
         "age_hours": round(age_hours, 1),
     }
 

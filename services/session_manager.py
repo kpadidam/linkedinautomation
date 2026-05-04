@@ -6,8 +6,21 @@ import os
 import signal
 import sys
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncIterator, Optional
+
+
+def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """Serialize a naive UTC datetime to an ISO string the frontend will
+    correctly parse as UTC. JS's ``new Date()`` treats offset-less ISO
+    strings as local time and silently shifts every timestamp by the
+    client's tz offset, so we always emit explicit UTC.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +59,10 @@ class SessionManager:
         return {
             "running": self.is_running,
             "paused": self.is_paused,
-            "paused_at": self.paused_at.isoformat() if self.paused_at else None,
+            "paused_at": _utc_iso(self.paused_at),
             "pause_duration_seconds": round(self.pause_duration_seconds, 1),
             "pid": self.process.pid if self.process else None,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "started_at": _utc_iso(self.started_at),
             "exit_code": self.exit_code,
             "log_count": len(self.log_buffer),
         }

@@ -7,6 +7,7 @@ import { FollowupList } from '@/features/bookmarks/FollowupList'
 import { InterviewList } from '@/features/interviews/InterviewList'
 import { cn, formatRelative, nextActionFor, scoreColor, statusColor, statusLabel } from '@/lib/utils'
 import { PIPELINE_STAGES } from '@/lib/types'
+import { useUndoStore } from '@/lib/undo'
 
 const ALL_STATUSES = ['new', ...PIPELINE_STAGES.map((s) => s.id)]
 
@@ -15,6 +16,7 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string | null; onCl
   const update = useUpdateJob()
   const { data: settings } = useSettings()
   const matchingEnabled = settings?.enable_resume_matching ?? true
+  const pushUndo = useUndoStore((s) => s.push)
   const [notes, setNotes] = useState('')
   const followupRef = useRef<HTMLElement | null>(null)
 
@@ -34,6 +36,18 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string | null; onCl
     if (job) update.mutate({ jobId: job.job_id, body: { status } })
   }
 
+  const rejectWithUndo = () => {
+    if (!job) return
+    const oldStatus = job.status
+    const jid = job.job_id
+    const title = job.title
+    update.mutate({ jobId: jid, body: { status: 'rejected' } })
+    pushUndo({
+      label: `Rejected ${title}`,
+      undo: () => update.mutate({ jobId: jid, body: { status: oldStatus } }),
+    })
+  }
+
   const scrollToFollowups = () => {
     followupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
@@ -51,7 +65,7 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string | null; onCl
               <FiBookmark className={cn('h-4 w-4', job?.status === 'saved' && 'fill-current text-brand-600')} />
               {job?.status === 'saved' ? 'Saved' : 'Save'}
             </button>
-            <button className="btn-ghost" onClick={() => setStatus('rejected')}>
+            <button className="btn-ghost" onClick={rejectWithUndo}>
               <FiSlash className="h-4 w-4" /> Reject
             </button>
             {job?.url ? (

@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
 import { FiChevronLeft, FiChevronRight, FiCalendar, FiBriefcase, FiTrash2 } from 'react-icons/fi'
-import { useInterviews, useDeleteInterview } from '@/hooks/useInterviews'
+import { useInterviews, useDeleteInterview, useCreateInterview } from '@/hooks/useInterviews'
 import { useJobs } from '@/hooks/useJobs'
 import { cn, statusColor } from '@/lib/utils'
 import { JobDetailDrawer } from '@/features/jobs/JobDetailDrawer'
+import { formatCompactWithTz, formatDualTime, getLocalTz, shouldShowDualTime } from '@/lib/tz'
+import { useUndoStore } from '@/lib/undo'
+import type { Interview } from '@/lib/types.interviews'
 
 function startOfMonth(d: Date) { return new Date(d.getFullYear(), d.getMonth(), 1) }
 function endOfMonth(d: Date) { return new Date(d.getFullYear(), d.getMonth() + 1, 0) }
@@ -16,6 +19,9 @@ export default function CalendarScreen() {
   const { data: interviews = [] } = useInterviews()
   const { data: jobs = [] } = useJobs({ limit: 500 })
   const del = useDeleteInterview()
+  const create = useCreateInterview()
+  const pushUndo = useUndoStore((s) => s.push)
+  const localTz = getLocalTz()
 
   const jobMap = useMemo(() => new Map(jobs.map((j) => [j.job_id, j])), [jobs])
 
@@ -86,6 +92,13 @@ export default function CalendarScreen() {
                 <div className="space-y-0.5 overflow-hidden">
                   {events.slice(0, 3).map((e) => {
                     const job = jobMap.get(e.job_id)
+                    const dual = shouldShowDualTime(e.interviewer_tz, localTz)
+                    const timeStr = dual && e.interviewer_tz
+                      ? formatCompactWithTz(e.scheduled_at, e.interviewer_tz)
+                      : new Date(e.scheduled_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+                    const titleExtra = dual && e.interviewer_tz
+                      ? ` ${formatDualTime(e.scheduled_at, e.interviewer_tz)}`
+                      : ''
                     return (
                       <button
                         key={e.id}
@@ -94,9 +107,9 @@ export default function CalendarScreen() {
                           'w-full text-left px-1.5 py-0.5 rounded text-[10px] truncate hover:opacity-80',
                           statusColor(e.stage)
                         )}
-                        title={`${e.stage} · ${job?.title || e.job_id}`}
+                        title={`${e.stage} · ${job?.title || e.job_id}${titleExtra}`}
                       >
-                        {new Date(e.scheduled_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}{' '}
+                        {timeStr}{' '}
                         <span className="font-medium">{e.stage}</span>{' '}
                         <span className="opacity-80">{job?.company || '—'}</span>
                       </button>
@@ -122,6 +135,22 @@ export default function CalendarScreen() {
           <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {interviews.slice(0, 8).map((e) => {
               const job = jobMap.get(e.job_id)
+              const dual = shouldShowDualTime(e.interviewer_tz, localTz)
+              const handleDelete = () => {
+                const snapshot = {
+                  job_id: e.job_id,
+                  stage: e.stage,
+                  scheduled_at: e.scheduled_at,
+                  location: e.location ?? undefined,
+                  notes: e.notes ?? undefined,
+                  interviewer_tz: e.interviewer_tz ?? null,
+                }
+                del.mutate(e.id)
+                pushUndo({
+                  label: `Deleted interview · ${e.stage}`,
+                  undo: () => create.mutate(snapshot as Omit<Interview, 'id' | 'created_at'>),
+                })
+              }
               return (
                 <li key={e.id} className="px-4 py-2 flex items-center gap-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
                   <div className="text-xs text-zinc-500 tabular-nums w-32">
@@ -131,8 +160,11 @@ export default function CalendarScreen() {
                   <button onClick={() => setOpenId(e.job_id)} className="flex-1 text-left text-sm hover:underline truncate">
                     <FiBriefcase className="inline h-3 w-3 mr-1 text-zinc-400" />
                     {job?.title || e.job_id} <span className="text-zinc-500">· {job?.company || ''}</span>
+                    {dual && e.interviewer_tz ? (
+                      <span className="ml-2 text-[11px] text-zinc-500">{formatDualTime(e.scheduled_at, e.interviewer_tz)}</span>
+                    ) : null}
                   </button>
-                  <button className="btn-ghost !p-1" onClick={() => del.mutate(e.id)}>
+                  <button className="btn-ghost !p-1" onClick={handleDelete}>
                     <FiTrash2 className="h-3.5 w-3.5" />
                   </button>
                 </li>

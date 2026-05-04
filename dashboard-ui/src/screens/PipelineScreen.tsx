@@ -9,6 +9,7 @@ import type { Interview } from '@/lib/types.interviews'
 import { cn, daysSince, nextActionFor, scoreColor, statusColor } from '@/lib/utils'
 import { JobDetailDrawer } from '@/features/jobs/JobDetailDrawer'
 import { ScheduleInterviewModal } from '@/features/interviews/ScheduleInterviewModal'
+import { useUndoStore } from '@/lib/undo'
 
 const STAGE_IDS = PIPELINE_STAGES.map((s) => s.id)
 
@@ -34,6 +35,7 @@ export default function PipelineScreen() {
   const { data: jobs = [] } = useJobs({ limit: 500 })
   const { data: interviews = [] } = useInterviews()
   const update = useUpdateJob()
+  const pushUndo = useUndoStore((s) => s.push)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [scheduleCtx, setScheduleCtx] = useState<ScheduleContext | null>(null)
@@ -80,7 +82,13 @@ export default function PipelineScreen() {
     if (!target || !STAGE_IDS.includes(target as never)) return
     const job = jobs.find((j) => j.job_id === id)
     if (!job || job.status === target) return
+    const oldStatus = job.status
+    const newLabel = PIPELINE_STAGES.find((s) => s.id === target)?.label ?? target
     update.mutate({ jobId: id, body: { status: target } })
+    pushUndo({
+      label: `Moved ${job.title} to ${newLabel}`,
+      undo: () => update.mutate({ jobId: id, body: { status: oldStatus } }),
+    })
   }
 
   const draggingJob = draggingId ? jobs.find((j) => j.job_id === draggingId) : null

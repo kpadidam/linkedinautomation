@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { FiPlus, FiCheck, FiTrash2, FiClock } from 'react-icons/fi'
 import { useCreateFollowup, useDeleteFollowup, useFollowups, useUpdateFollowup } from '@/hooks/useInterviews'
 import { cn, formatRelative } from '@/lib/utils'
+import { useUndoStore } from '@/lib/undo'
 
 export function FollowupList({ jobId }: { jobId: string }) {
   const { data: items = [] } = useFollowups(jobId)
   const create = useCreateFollowup()
   const update = useUpdateFollowup()
   const del = useDeleteFollowup()
+  const pushUndo = useUndoStore((s) => s.push)
   const [adding, setAdding] = useState(false)
   const [due, setDue] = useState<string>(() => {
     const d = new Date(); d.setDate(d.getDate() + 3); d.setMinutes(0); d.setSeconds(0)
@@ -38,7 +40,17 @@ export function FollowupList({ jobId }: { jobId: string }) {
               </span>
               <span className={cn('flex-1 truncate', f.done && 'line-through text-zinc-400')}>{f.note || '—'}</span>
               <span className="text-[10px] text-zinc-400">{formatRelative(f.due_at)}</span>
-              <button className="btn-ghost !p-1" onClick={() => del.mutate(f.id)}>
+              <button
+                className="btn-ghost !p-1"
+                onClick={() => {
+                  const snapshot = { job_id: f.job_id, due_at: f.due_at, note: f.note ?? undefined }
+                  del.mutate(f.id)
+                  pushUndo({
+                    label: 'Deleted follow-up',
+                    undo: () => create.mutate(snapshot),
+                  })
+                }}
+              >
                 <FiTrash2 className="h-3.5 w-3.5" />
               </button>
             </li>

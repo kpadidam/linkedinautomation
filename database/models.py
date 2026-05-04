@@ -207,6 +207,14 @@ class UserProfile(Base):
     headless_browser = Column(Boolean, default=True)
     browser_timeout = Column(Integer, default=30000)
 
+    # Secrets (DB-first, .env fallback). Stored plaintext on the local SQLite
+    # file — single-user threat model. UI accepts edits via /api/settings;
+    # quick_search.py copies these into os.environ at scrape time.
+    openai_api_key = Column(Text, nullable=True)
+    groq_api_key = Column(Text, nullable=True)
+    linkedin_email = Column(String(200), nullable=True)
+    linkedin_password = Column(Text, nullable=True)
+
     # Resumable scraper progress (Option A: checkpoint per category).
     # last_completed_category_index is -1 when no run is in flight; otherwise
     # the index of the last fully-finished category in the most recent

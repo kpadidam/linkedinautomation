@@ -7,6 +7,7 @@ Searches all configured job categories and logs to Google Sheets
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
@@ -67,6 +68,29 @@ class JobSearchAutomation:
                 # Pull persisted feature flag (UI-editable). Fallback to env.
                 if profile.enable_resume_matching is not None:
                     self.enable_resume_matching = bool(profile.enable_resume_matching)
+
+                # DB-first secret resolution. If the DB has a non-empty value,
+                # mirror it into os.environ so anything that reads env vars
+                # (Browser-Use, raw OpenAI/Groq SDK clients, child processes)
+                # picks up the UI-edited value without a server restart.
+                # If the DB field is empty, the existing .env value stays.
+                def _override_env(env_key: str, db_val):
+                    if db_val and str(db_val).strip():
+                        os.environ[env_key] = str(db_val).strip()
+                _override_env("OPENAI_API_KEY", profile.openai_api_key)
+                _override_env("GROQ_API_KEY", profile.groq_api_key)
+                _override_env("LINKEDIN_EMAIL", profile.linkedin_email)
+                _override_env("LINKEDIN_PASSWORD", profile.linkedin_password)
+                # Mirror onto the in-memory settings singleton too, since some
+                # callers (e.g. ResumeMatcherService) read settings.* directly.
+                if profile.openai_api_key:
+                    settings.openai_api_key = profile.openai_api_key
+                if profile.groq_api_key:
+                    settings.groq_api_key = profile.groq_api_key
+                if profile.linkedin_email:
+                    settings.linkedin_email = profile.linkedin_email
+                if profile.linkedin_password:
+                    settings.linkedin_password = profile.linkedin_password
 
                 # Honor checkpoint only if fresh (<24h). Stale = reset.
                 idx = profile.last_completed_category_index

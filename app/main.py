@@ -98,8 +98,9 @@ class SettingsUpdateRequest(BaseModel):
     """Partial-update payload for /api/settings.
 
     All fields optional so the UI can PATCH-style send any subset. Secret-bearing
-    config (API keys, LinkedIn creds, sheet ID) is intentionally read-only here
-    and exposed via boolean ``*_configured`` flags only.
+    config (API keys, LinkedIn creds) now persists in the DB so the UI can
+    edit it without requiring a server restart. Empty string clears the field
+    (falls back to ``.env`` if present).
     """
     enable_resume_matching: Optional[bool] = None
     headless_browser: Optional[bool] = None
@@ -108,6 +109,11 @@ class SettingsUpdateRequest(BaseModel):
     search_frequency_hours: Optional[int] = None
     min_match_score_alert: Optional[float] = None
     email_notifications: Optional[bool] = None
+    # Secrets: empty string => clear (use .env fallback). null => no change.
+    openai_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    linkedin_email: Optional[str] = None
+    linkedin_password: Optional[str] = None
 
 
 def _run_sqlite_migrations() -> None:
@@ -125,6 +131,11 @@ def _run_sqlite_migrations() -> None:
         ("user_profile", "browser_timeout", "INTEGER DEFAULT 30000"),
         ("user_profile", "last_completed_category_index", "INTEGER DEFAULT -1"),
         ("user_profile", "pending_search_started_at", "DATETIME"),
+        # Secrets (DB-first, .env fallback)
+        ("user_profile", "openai_api_key", "TEXT"),
+        ("user_profile", "groq_api_key", "TEXT"),
+        ("user_profile", "linkedin_email", "VARCHAR(200)"),
+        ("user_profile", "linkedin_password", "TEXT"),
         ("interview_events", "interviewer_tz", "VARCHAR(64)"),
     ]
     try:
@@ -406,12 +417,60 @@ async def update_profile(
     return {"status": "success", "message": "Profile updated"}
 
 
+def _resolve_secret(db_value, env_value):
+    """DB-first, .env fallback. Returns (configured: bool, source: str|None).
+
+    ``source`` is "db" when the DB has a non-empty value, "env" when only
+    the .env fallback is set, None when nothing is configured.
+    """
+    db_set = bool(db_value) and str(db_value).strip() != ""
+    env_set = bool(env_value) and str(env_value).strip() != ""
+    if db_set:
+        return True, "db"
+    if env_set:
+        return True, "env"
+    return False, None
+
+
+def _effective_secret(db_value, env_value):
+    """Return whichever value is currently effective (DB beats .env)."""
+    if db_value and str(db_value).strip() != "":
+        return db_value
+    return env_value or None
+
+
 def _settings_doc(profile) -> Dict[str, Any]:
     """Build the canonical /api/settings response from a UserProfile row.
 
-    ``secrets`` only ever returns booleans — never the underlying value — so
-    this endpoint is safe for the frontend to fetch unauthenticated locally.
+    ``secrets`` returns only booleans + source — never the underlying value.
+    UI uses ``source == "env"`` to render a "From .env" badge so the user
+    knows the value isn't editable from the form (would need to be cleared
+    in .env first).
     """
+    openai_ok, openai_src = _resolve_secret(
+        getattr(profile, "openai_api_key", None),
+        getattr(settings, "openai_api_key", None),
+    )
+    groq_ok, groq_src = _resolve_secret(
+        getattr(profile, "groq_api_key", None),
+        getattr(settings, "groq_api_key", None),
+    )
+    li_email_db = getattr(profile, "linkedin_email", None)
+    li_pw_db = getattr(profile, "linkedin_password", None)
+    li_email_env = getattr(settings, "linkedin_email", None)
+    li_pw_env = getattr(settings, "linkedin_password", None)
+    # LinkedIn needs BOTH email and password; the source whose pair is
+    # complete wins. DB-pair beats env-pair beats nothing.
+    if li_email_db and li_pw_db:
+        linkedin_ok, linkedin_src = True, "db"
+    elif li_email_env and li_pw_env:
+        linkedin_ok, linkedin_src = True, "env"
+    else:
+        linkedin_ok, linkedin_src = False, None
+    sheets_ok, sheets_src = _resolve_secret(
+        None,  # sheets ID isn't persisted in UserProfile
+        getattr(settings, "google_sheets_id", None),
+    )
     return {
         "enable_resume_matching": (
             bool(profile.enable_resume_matching)
@@ -433,14 +492,80 @@ def _settings_doc(profile) -> Dict[str, Any]:
         "min_match_score_alert": float(profile.min_match_score_alert or 0.0),
         "email_notifications": bool(profile.email_notifications),
         "secrets": {
-            "openai_configured": bool(getattr(settings, "openai_api_key", None)),
-            "groq_configured": bool(getattr(settings, "groq_api_key", None)),
-            "linkedin_configured": bool(
-                getattr(settings, "linkedin_email", None)
-                and getattr(settings, "linkedin_password", None)
-            ),
-            "sheets_configured": bool(getattr(settings, "google_sheets_id", None)),
+            "openai_configured": openai_ok,
+            "openai_source": openai_src,
+            "groq_configured": groq_ok,
+            "groq_source": groq_src,
+            "linkedin_configured": linkedin_ok,
+            "linkedin_source": linkedin_src,
+            "sheets_configured": sheets_ok,
+            "sheets_source": sheets_src,
         },
+    }
+
+
+def _setup_items(db) -> List[Dict[str, Any]]:
+    """Compute the 5 setup items required before the scraper can run."""
+    profile = db_manager.get_or_create_user_profile(db)
+    has_profile = bool((profile.name or "").strip()) or bool(
+        (profile.email or "").strip()
+    )
+    has_roles = bool(profile.search_roles) and len(profile.search_roles) > 0
+    has_resume = bool((profile.resume_text or "").strip())
+    openai_ok, _ = _resolve_secret(
+        profile.openai_api_key, getattr(settings, "openai_api_key", None)
+    )
+    groq_ok, _ = _resolve_secret(
+        profile.groq_api_key, getattr(settings, "groq_api_key", None)
+    )
+    has_llm = openai_ok or groq_ok
+    has_sheets = bool(getattr(settings, "google_sheets_id", None))
+    return [
+        {
+            "id": "profile",
+            "label": "Profile (name + email)",
+            "complete": has_profile,
+            "optional": False,
+            "hint": "/settings/profile",
+        },
+        {
+            "id": "roles",
+            "label": "At least one Search Role",
+            "complete": has_roles,
+            "optional": False,
+            "hint": "/settings/profile",
+        },
+        {
+            "id": "resume",
+            "label": "Resume text or PDF",
+            "complete": has_resume,
+            "optional": False,
+            "hint": "/settings/profile",
+        },
+        {
+            "id": "llm",
+            "label": "LLM API key (OpenAI or Groq)",
+            "complete": has_llm,
+            "optional": False,
+            "hint": "/settings/integrations",
+        },
+        {
+            "id": "sheets",
+            "label": "Google Sheets credentials",
+            "complete": has_sheets,
+            "optional": True,
+            "hint": "/settings/integrations",
+        },
+    ]
+
+
+def _setup_doc(db) -> Dict[str, Any]:
+    items = _setup_items(db)
+    missing_required = [i for i in items if not i["complete"] and not i.get("optional")]
+    return {
+        "complete": len(missing_required) == 0,
+        "missing_required": [i["id"] for i in missing_required],
+        "items": items,
     }
 
 
@@ -456,14 +581,33 @@ async def update_settings(
     request: SettingsUpdateRequest,
     db: Session = Depends(get_db),
 ):
-    """Persist a partial settings update; returns the full updated doc."""
+    """Persist a partial settings update; returns the full updated doc.
+
+    Empty-string for any secret field clears the DB value (so the .env
+    fallback takes effect again). null leaves it untouched.
+    """
     updates = request.dict(exclude_unset=True)
+    # Normalize secret-clearing: empty strings → None so DB stores NULL.
+    SECRET_KEYS = ("openai_api_key", "groq_api_key", "linkedin_email", "linkedin_password")
+    for k in SECRET_KEYS:
+        if k in updates and updates[k] == "":
+            updates[k] = None
     if updates:
         success = db_manager.update_user_profile(db, **updates)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update settings")
     profile = db_manager.get_or_create_user_profile(db)
     return _settings_doc(profile)
+
+
+@app.get("/api/setup/status")
+async def setup_status(db: Session = Depends(get_db)):
+    """Return the 5-item setup checklist + overall complete flag.
+
+    Used by the Dashboard banner, the gated Start button, and the first-run
+    wizard route. Each item carries a ``hint`` (a route the UI can link to).
+    """
+    return _setup_doc(db)
 
 
 @app.get("/api/statistics")
@@ -568,7 +712,21 @@ async def session_status(db: Session = Depends(get_db)):
 
 
 @app.post("/api/sessions/start")
-async def session_start():
+async def session_start(db: Session = Depends(get_db)):
+    """Refuse to start the scraper while required setup items are missing.
+
+    Returns 400 with the list of missing item IDs so the UI can highlight them.
+    """
+    setup = _setup_doc(db)
+    if not setup["complete"]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "setup_incomplete",
+                "missing": setup["missing_required"],
+                "message": "Setup incomplete: " + ", ".join(setup["missing_required"]),
+            },
+        )
     return await session_manager.start()
 
 

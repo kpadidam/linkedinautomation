@@ -80,6 +80,10 @@ export default function AutomationScreen() {
   const draftValue = Number(freqDraft) || frequencyMinutes
   const atMin = draftValue <= FREQUENCY_MIN_MINUTES
   const atMax = draftValue >= FREQUENCY_MAX_MINUTES
+  // While the user is typing they can briefly hold a sub-30 value before
+  // commitFrequency() clamps it back up on blur. Surface a clear error
+  // explaining WHY we don't allow it — LinkedIn flags bot-cadence polling.
+  const belowMin = draftValue < FREQUENCY_MIN_MINUTES
 
   return (
     <div className="space-y-8">
@@ -96,8 +100,18 @@ export default function AutomationScreen() {
           hint={`Minutes between runs. Minimum ${FREQUENCY_MIN_MINUTES}m (rate-limit floor), maximum 24h. ↑/↓ keys or buttons step by ${FREQUENCY_STEP_MINUTES}m; type any value in-between.`}
           align="start"
         >
+          <div className="space-y-2">
           <div className="flex items-center gap-3">
-            <div className="inline-flex items-stretch rounded-xl border border-zinc-900/30 dark:border-zinc-100/30 bg-white dark:bg-zinc-950 overflow-hidden">
+            <div
+              className={cn(
+                'inline-flex items-stretch rounded-xl border bg-white dark:bg-zinc-950 overflow-hidden transition-colors',
+                belowMin
+                  ? 'border-rose-500 dark:border-rose-400'
+                  : atMin
+                    ? 'border-amber-400 dark:border-amber-500/70'
+                    : 'border-zinc-900/30 dark:border-zinc-100/30',
+              )}
+            >
               <button
                 type="button"
                 onClick={() => stepFrequency(-FREQUENCY_STEP_MINUTES)}
@@ -157,6 +171,30 @@ export default function AutomationScreen() {
                 {fmtCadence(draftValue)}
               </span>
             </span>
+          </div>
+          {belowMin ? (
+            <div
+              role="alert"
+              className="flex items-start gap-1.5 rounded-md border border-rose-300 dark:border-rose-700/60 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs text-rose-800 dark:text-rose-200"
+            >
+              <span aria-hidden className="mt-0.5">⚠️</span>
+              <span>
+                <strong>LinkedIn has bot detection.</strong> Polling faster than{' '}
+                {FREQUENCY_MIN_MINUTES} minutes risks flagging your account or
+                triggering CAPTCHAs. Value will be clamped to{' '}
+                {FREQUENCY_MIN_MINUTES}m on save.
+              </span>
+            </div>
+          ) : atMin ? (
+            <div className="flex items-start gap-1.5 rounded-md border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+              <span aria-hidden className="mt-0.5">ℹ️</span>
+              <span>
+                You're at the rate-limit floor. LinkedIn's bot detection
+                triggers below {FREQUENCY_MIN_MINUTES}-minute polling, so this
+                is the safest fastest cadence.
+              </span>
+            </div>
+          ) : null}
           </div>
         </FieldRow>
         <FieldRow label="Schedule" align="start">

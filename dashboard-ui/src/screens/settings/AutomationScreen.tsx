@@ -1,24 +1,22 @@
 import { useEffect, useState } from 'react'
+import { FiChevronUp, FiChevronDown } from 'react-icons/fi'
 import {
   SettingsCard,
   FieldRow,
   TextInput,
-  Select,
   Toggle,
 } from './_components'
 import { useSessionStatus } from '@/hooks/useSession'
 import { useSettings, useUpdateSettings } from '@/hooks/useSettings'
+import { cn } from '@/lib/utils'
 
-const RECOMMENDED_MIN_MINUTES = 30
-const FREQUENCY_OPTIONS = [
-  { value: '15', label: '15 minutes (rate-limit risk)' },
-  { value: '30', label: '30 minutes (recommended minimum)' },
-  { value: '60', label: '1 hour' },
-  { value: '180', label: '3 hours' },
-  { value: '360', label: '6 hours' },
-  { value: '720', label: '12 hours' },
-  { value: '1440', label: '24 hours' },
-]
+// Hard floor — any value below this is rejected client-side. The 30-minute
+// minimum is the rate-limit guardrail; sustained sub-30m polling will get
+// the LinkedIn account flagged. To bypass for testing hit /api/settings
+// directly with curl.
+const FREQUENCY_MIN_MINUTES = 30
+const FREQUENCY_MAX_MINUTES = 1440 // 24h
+const FREQUENCY_STEP_MINUTES = 5
 
 function fmtCadence(m: number): string {
   if (m < 60) return `${m}m`
@@ -37,6 +35,32 @@ export default function AutomationScreen() {
   const lastRun = sessionStatus?.next_trigger?.last_run_at
   const nextAt = sessionStatus?.next_trigger?.next_at
 
+  // Local draft for the stepper so users can type freely; we commit on
+  // blur or stepper-button click so the server isn't hammered per keystroke.
+  const [freqDraft, setFreqDraft] = useState<string>('')
+  useEffect(() => {
+    if (settings.data) setFreqDraft(String(settings.data.search_frequency_minutes))
+  }, [settings.data?.search_frequency_minutes])
+
+  const commitFrequency = (raw: string | number) => {
+    const n = Math.round(Number(raw))
+    if (!Number.isFinite(n)) {
+      setFreqDraft(String(frequencyMinutes))
+      return
+    }
+    const clamped = Math.min(
+      FREQUENCY_MAX_MINUTES,
+      Math.max(FREQUENCY_MIN_MINUTES, n),
+    )
+    setFreqDraft(String(clamped))
+    if (clamped === frequencyMinutes) return
+    updateSettings.mutate({ search_frequency_minutes: clamped })
+  }
+  const stepFrequency = (delta: number) => {
+    const base = Number(freqDraft) || frequencyMinutes
+    commitFrequency(base + delta)
+  }
+
   const [minMatch, setMinMatch] = useState<string>('')
   useEffect(() => {
     if (settings.data) setMinMatch(String(settings.data.min_match_score_alert ?? 0))
@@ -53,23 +77,9 @@ export default function AutomationScreen() {
     updateSettings.mutate({ min_match_score_alert: n })
   }
 
-  // Saved value may not match a picker option (e.g. legacy hour-only values
-  // or stale test values < 15m). Render it as a "(non-standard)" top option
-  // so the user can see what's currently set and pick a real option to fix.
-  const knownOption = FREQUENCY_OPTIONS.find(
-    (o) => Number(o.value) === frequencyMinutes,
-  )
-  const options = knownOption
-    ? FREQUENCY_OPTIONS
-    : [
-        {
-          value: String(frequencyMinutes),
-          label: `Current: ${fmtCadence(frequencyMinutes)} (non-standard)`,
-        },
-        ...FREQUENCY_OPTIONS,
-      ]
-  const optionValue = String(frequencyMinutes)
-  const isLowFrequency = frequencyMinutes < RECOMMENDED_MIN_MINUTES
+  const draftValue = Number(freqDraft) || frequencyMinutes
+  const atMin = draftValue <= FREQUENCY_MIN_MINUTES
+  const atMax = draftValue >= FREQUENCY_MAX_MINUTES
 
   return (
     <div className="space-y-8">
@@ -81,23 +91,79 @@ export default function AutomationScreen() {
             label="Enable auto-search"
           />
         </FieldRow>
-        <FieldRow label="Frequency" hint={isLowFrequency ? 'Below recommended 30-minute floor — only use for short testing windows. Sustained sub-30-minute polling risks LinkedIn rate limiting / detection.' : undefined} align="start">
-          <Select
-            value={optionValue}
-            onChange={(v) => updateSettings.mutate({ search_frequency_minutes: Number(v) })}
-            options={options}
-          />
+        <FieldRow
+          label="Frequency"
+          hint={`Minutes between runs. Minimum ${FREQUENCY_MIN_MINUTES}m (rate-limit floor), maximum 24h. ↑/↓ keys or buttons step by ${FREQUENCY_STEP_MINUTES}m; type any value in-between.`}
+          align="start"
+        >
+          <div className="flex items-center gap-3">
+            <div className="inline-flex items-stretch rounded-xl border border-zinc-900/30 dark:border-zinc-100/30 bg-white dark:bg-zinc-950 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => stepFrequency(-FREQUENCY_STEP_MINUTES)}
+                disabled={atMin || updateSettings.isPending}
+                className={cn(
+                  'px-3 flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors',
+                  atMin && 'opacity-30 cursor-not-allowed',
+                )}
+                aria-label={`Decrease by ${FREQUENCY_STEP_MINUTES} minutes`}
+                title={`-${FREQUENCY_STEP_MINUTES}m`}
+              >
+                <FiChevronDown className="h-4 w-4" />
+              </button>
+              <input
+                type="number"
+                min={FREQUENCY_MIN_MINUTES}
+                max={FREQUENCY_MAX_MINUTES}
+                step={1}
+                value={freqDraft}
+                onChange={(e) => setFreqDraft(e.target.value)}
+                onBlur={() => commitFrequency(freqDraft)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    stepFrequency(FREQUENCY_STEP_MINUTES)
+                  }
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    stepFrequency(-FREQUENCY_STEP_MINUTES)
+                  }
+                }}
+                className={cn(
+                  'w-20 text-center text-sm font-mono tabular-nums px-2 py-2',
+                  'bg-transparent border-x border-zinc-900/15 dark:border-zinc-100/15',
+                  'focus:outline-none focus:bg-zinc-50 dark:focus:bg-zinc-900',
+                )}
+                aria-label="Auto-search frequency in minutes"
+              />
+              <button
+                type="button"
+                onClick={() => stepFrequency(FREQUENCY_STEP_MINUTES)}
+                disabled={atMax || updateSettings.isPending}
+                className={cn(
+                  'px-3 flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors',
+                  atMax && 'opacity-30 cursor-not-allowed',
+                )}
+                aria-label={`Increase by ${FREQUENCY_STEP_MINUTES} minutes`}
+                title={`+${FREQUENCY_STEP_MINUTES}m`}
+              >
+                <FiChevronUp className="h-4 w-4" />
+              </button>
+            </div>
+            <span className="text-sm text-zinc-500 dark:text-zinc-400">
+              minutes ·{' '}
+              <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                {fmtCadence(draftValue)}
+              </span>
+            </span>
+          </div>
         </FieldRow>
         <FieldRow label="Schedule" align="start">
           <div className="text-sm text-zinc-700 dark:text-zinc-300 space-y-0.5">
             <div>
               Cadence:{' '}
               <span className="font-mono">{fmtCadence(frequencyMinutes)}</span>
-              {isLowFrequency ? (
-                <span className="ml-2 text-amber-700 dark:text-amber-400 text-xs">
-                  ⚠️ testing window
-                </span>
-              ) : null}
             </div>
             <div className="text-xs text-zinc-500 dark:text-zinc-400">
               Last run: {lastRun ? new Date(lastRun).toLocaleString() : '—'}

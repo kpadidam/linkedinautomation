@@ -22,9 +22,11 @@ type CalendarView = 'day' | 'week' | 'month'
 const VIEW_STORAGE_KEY = 'calendar.view'
 
 function readStoredView(): CalendarView {
-  if (typeof window === 'undefined') return 'month'
+  // Default = week. localStorage choice still wins so users who explicitly
+  // pick day/month don't get reset.
+  if (typeof window === 'undefined') return 'week'
   const v = window.localStorage.getItem(VIEW_STORAGE_KEY)
-  return v === 'day' || v === 'week' || v === 'month' ? v : 'month'
+  return v === 'day' || v === 'week' || v === 'month' ? v : 'week'
 }
 
 function startOfMonth(d: Date) {

@@ -11,6 +11,9 @@ export interface PendingProgress {
 
 export interface SessionStatus {
   running: boolean
+  paused: boolean
+  paused_at: string | null
+  pause_duration_seconds: number
   pid: number | null
   started_at: string | null
   exit_code: number | null
@@ -63,6 +66,28 @@ export function useResetSession() {
         const err = await r.json().catch(() => ({}))
         throw new Error(err.detail || `${r.status} ${r.statusText}`)
       }
+      return r.json()
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),
+  })
+}
+
+export function usePauseSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const r = await fetch('/api/sessions/pause', { method: 'POST' })
+      return r.json()
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),
+  })
+}
+
+export function useResumePausedSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const r = await fetch('/api/sessions/resume', { method: 'POST' })
       return r.json()
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),

@@ -13,7 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 class SessionManager:
-    """Manages a single scraper subprocess with live log broadcasting."""
+    """Manages a single scraper subprocess with live log broadcasting.
+
+    Supports SIGSTOP/SIGCONT-based pause to freeze the process in place
+    without losing browser state. Pauses long enough to expire LinkedIn
+    cookies (~5 minutes) may break the run on resume — best for short
+    interruptions (coffee, fixing a CAPTCHA).
+    """
 
     def __init__(self, project_root: str):
         self.project_root = project_root
@@ -23,14 +29,25 @@ class SessionManager:
         self.log_buffer: deque[str] = deque(maxlen=2000)
         self.subscribers: list[asyncio.Queue[str]] = []
         self._reader_task: Optional[asyncio.Task] = None
+        # Pause state: process-level freeze via SIGSTOP/SIGCONT
+        self.paused: bool = False
+        self.paused_at: Optional[datetime] = None
+        self.pause_duration_seconds: float = 0.0  # cumulative across multiple pauses
 
     @property
     def is_running(self) -> bool:
         return self.process is not None and self.process.returncode is None
 
+    @property
+    def is_paused(self) -> bool:
+        return self.is_running and self.paused
+
     def status(self) -> dict:
         return {
             "running": self.is_running,
+            "paused": self.is_paused,
+            "paused_at": self.paused_at.isoformat() if self.paused_at else None,
+            "pause_duration_seconds": round(self.pause_duration_seconds, 1),
             "pid": self.process.pid if self.process else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "exit_code": self.exit_code,
@@ -64,14 +81,69 @@ class SessionManager:
         )
         self.started_at = datetime.utcnow()
         self.exit_code = None
+        # Reset pause accounting for the new run.
+        self.paused = False
+        self.paused_at = None
+        self.pause_duration_seconds = 0.0
         self.log_buffer.clear()
         self._reader_task = asyncio.create_task(self._read_output())
         self._broadcast(f"[session] started pid={self.process.pid} script={script}")
         return {"status": "started", **self.status()}
 
+    async def pause(self) -> dict:
+        """Freeze the running process via SIGSTOP. Idempotent on already-paused."""
+        if not self.is_running:
+            return {"status": "not_running", **self.status()}
+        if self.paused:
+            return {"status": "already_paused", **self.status()}
+        try:
+            self.process.send_signal(signal.SIGSTOP)
+        except ProcessLookupError:
+            return {"status": "not_running", **self.status()}
+        self.paused = True
+        self.paused_at = datetime.utcnow()
+        self._broadcast(f"[session] paused at {self.paused_at.isoformat()}")
+        return {"status": "paused", **self.status()}
+
+    async def resume(self) -> dict:
+        """Wake a paused process via SIGCONT. Idempotent on not-paused."""
+        if not self.is_running:
+            return {"status": "not_running", **self.status()}
+        if not self.paused:
+            return {"status": "not_paused", **self.status()}
+        try:
+            self.process.send_signal(signal.SIGCONT)
+        except ProcessLookupError:
+            return {"status": "not_running", **self.status()}
+        # Add this pause window to the cumulative total so elapsed-runtime
+        # math can subtract it out for an accurate "active" timer.
+        if self.paused_at:
+            elapsed = (datetime.utcnow() - self.paused_at).total_seconds()
+            self.pause_duration_seconds += elapsed
+            self._broadcast(
+                f"[session] resumed (paused {int(elapsed)}s; "
+                f"cumulative {int(self.pause_duration_seconds)}s)"
+            )
+        self.paused = False
+        self.paused_at = None
+        return {"status": "resumed", **self.status()}
+
     async def stop(self) -> dict:
         if not self.is_running:
             return {"status": "not_running", **self.status()}
+        # If the process is paused, SIGTERM is queued until SIGCONT —
+        # wake it first so it can actually shut down within the timeout.
+        if self.paused:
+            try:
+                self.process.send_signal(signal.SIGCONT)
+                if self.paused_at:
+                    self.pause_duration_seconds += (
+                        datetime.utcnow() - self.paused_at
+                    ).total_seconds()
+            except ProcessLookupError:
+                pass
+            self.paused = False
+            self.paused_at = None
         try:
             self.process.send_signal(signal.SIGTERM)
             try:

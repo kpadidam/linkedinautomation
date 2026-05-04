@@ -735,6 +735,23 @@ async def session_stop():
     return await session_manager.stop()
 
 
+@app.post("/api/sessions/pause")
+async def session_pause():
+    """Freeze the running scraper subprocess via SIGSTOP.
+
+    Idempotent — returns the current status payload either way. Pauses are
+    intended for short interruptions (<5min); long pauses risk LinkedIn
+    cookie expiry and detection of an idle browser.
+    """
+    return await session_manager.pause()
+
+
+@app.post("/api/sessions/resume")
+async def session_resume_paused():
+    """Wake a paused scraper subprocess via SIGCONT."""
+    return await session_manager.resume()
+
+
 @app.post("/api/sessions/reset")
 async def session_reset(db: Session = Depends(get_db)):
     """Clear the resumable checkpoint so the next Start runs from scratch.

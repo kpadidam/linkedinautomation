@@ -28,6 +28,9 @@ wheels/
 .env.local
 .env.*.local
 
+# Credentials
+credentials.json
+
 # Database
 *.db
 *.sqlite
@@ -54,6 +57,7 @@ resumes/*.pdf
 
 # Data files
 data/
+data/browser_profile/
 *.csv
 *.xlsx
 
@@ -66,7 +70,9 @@ test-results/
 *.bak
 *~
 debug_*.png
+login_error.png
 *.png
+*.pdf
 
 # Search logs
 linkedin_scrape_log.json

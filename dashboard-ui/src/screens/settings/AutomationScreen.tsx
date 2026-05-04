@@ -11,8 +11,6 @@ import { useSettings, useUpdateSettings } from '@/hooks/useSettings'
 
 const RECOMMENDED_MIN_MINUTES = 30
 const FREQUENCY_OPTIONS = [
-  { value: '2', label: '2 minutes — testing only ⚠️' },
-  { value: '5', label: '5 minutes — testing only ⚠️' },
   { value: '15', label: '15 minutes (rate-limit risk)' },
   { value: '30', label: '30 minutes (recommended minimum)' },
   { value: '60', label: '1 hour' },
@@ -55,13 +53,22 @@ export default function AutomationScreen() {
     updateSettings.mutate({ min_match_score_alert: n })
   }
 
-  // Round to a known option; if user has a custom value (legacy hours-only)
-  // we still match 60/180/360/720/1440 cleanly. Otherwise fall through to
-  // the closest stamp.
-  const optionValue = FREQUENCY_OPTIONS.find((o) => Number(o.value) === frequencyMinutes)
-    ? String(frequencyMinutes)
-    : String(frequencyMinutes)
-
+  // Saved value may not match a picker option (e.g. legacy hour-only values
+  // or stale test values < 15m). Render it as a "(non-standard)" top option
+  // so the user can see what's currently set and pick a real option to fix.
+  const knownOption = FREQUENCY_OPTIONS.find(
+    (o) => Number(o.value) === frequencyMinutes,
+  )
+  const options = knownOption
+    ? FREQUENCY_OPTIONS
+    : [
+        {
+          value: String(frequencyMinutes),
+          label: `Current: ${fmtCadence(frequencyMinutes)} (non-standard)`,
+        },
+        ...FREQUENCY_OPTIONS,
+      ]
+  const optionValue = String(frequencyMinutes)
   const isLowFrequency = frequencyMinutes < RECOMMENDED_MIN_MINUTES
 
   return (
@@ -78,7 +85,7 @@ export default function AutomationScreen() {
           <Select
             value={optionValue}
             onChange={(v) => updateSettings.mutate({ search_frequency_minutes: Number(v) })}
-            options={FREQUENCY_OPTIONS}
+            options={options}
           />
         </FieldRow>
         <FieldRow label="Schedule" align="start">

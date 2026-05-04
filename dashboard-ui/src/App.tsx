@@ -7,7 +7,12 @@ import { Navigate } from 'react-router-dom'
 import PipelineScreen from '@/screens/PipelineScreen'
 import CalendarScreen from '@/screens/CalendarScreen'
 import SessionScreen from '@/screens/SessionScreen'
-import SettingsScreen from '@/screens/SettingsScreen'
+import SettingsLayout from '@/screens/settings/SettingsLayout'
+import ProfileResumeScreen from '@/screens/settings/ProfileResumeScreen'
+import SearchRolesScreen from '@/screens/settings/SearchRolesScreen'
+import IntegrationsScreen from '@/screens/settings/IntegrationsScreen'
+import AutomationScreen from '@/screens/settings/AutomationScreen'
+import SystemScreen from '@/screens/settings/SystemScreen'
 import { applyTheme, useTheme } from '@/hooks/useTheme'
 
 export default function App() {
@@ -24,7 +29,14 @@ export default function App() {
           <Route path="pipeline" element={<PipelineScreen />} />
           <Route path="calendar" element={<CalendarScreen />} />
           <Route path="session" element={<SessionScreen />} />
-          <Route path="settings" element={<SettingsScreen />} />
+          <Route path="settings" element={<SettingsLayout />}>
+            <Route index element={<Navigate to="profile" replace />} />
+            <Route path="profile" element={<ProfileResumeScreen />} />
+            <Route path="roles" element={<SearchRolesScreen />} />
+            <Route path="integrations" element={<IntegrationsScreen />} />
+            <Route path="automation" element={<AutomationScreen />} />
+            <Route path="system" element={<SystemScreen />} />
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>

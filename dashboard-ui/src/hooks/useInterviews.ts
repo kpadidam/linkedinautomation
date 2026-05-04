@@ -27,6 +27,15 @@ export function useCreateInterview() {
   })
 }
 
+export function useUpdateInterview() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Partial<Omit<Interview, 'id' | 'job_id' | 'created_at'>> }) =>
+      http<Interview>(`/api/interviews/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['interviews'] }),
+  })
+}
+
 export function useDeleteInterview() {
   const qc = useQueryClient()
   return useMutation({

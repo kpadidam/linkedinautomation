@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   FiInbox,
   FiBookmark,
@@ -16,7 +16,9 @@ import {
 import { useJobs, useStatistics, useSearches } from '@/hooks/useJobs'
 import { useFollowups } from '@/hooks/useInterviews'
 import { useSettings } from '@/hooks/useSettings'
+import { useSetupStatus } from '@/hooks/useSetup'
 import { StatCard } from '@/components/StatCard'
+import { SetupBanner } from '@/components/SetupBanner'
 import { JobDetailDrawer } from '@/features/jobs/JobDetailDrawer'
 import { PIPELINE_STAGES } from '@/lib/types'
 import { cn, formatRelative, nextActionFor, scoreColor, statusColor, statusLabel } from '@/lib/utils'
@@ -25,13 +27,29 @@ const NEW_THRESHOLD_HOURS = 24
 const HIGH_MATCH = 80
 
 export default function DashboardScreen() {
+  const navigate = useNavigate()
   const { data: stats } = useStatistics()
   const { data: searches = [] } = useSearches(3)
   const { data: jobs = [] } = useJobs({ limit: 500 })
   const { data: followups = [] } = useFollowups()
   const { data: settings } = useSettings()
+  const { data: setup } = useSetupStatus()
   const matchingEnabled = settings?.enable_resume_matching ?? true
   const [openId, setOpenId] = useState<string | null>(null)
+
+  // First-run auto-redirect: when ALL required setup items are missing
+  // (fresh clone), bounce to /setup. Use sessionStorage so we only redirect
+  // once per browser session — user can still navigate back to / manually.
+  useEffect(() => {
+    if (!setup) return
+    const required = setup.items.filter((i) => !i.optional)
+    const allEmpty = required.every((i) => !i.complete)
+    if (!allEmpty) return
+    if (typeof window === 'undefined') return
+    if (sessionStorage.getItem('setup-redirect-done') === '1') return
+    sessionStorage.setItem('setup-redirect-done', '1')
+    navigate('/setup', { replace: true })
+  }, [setup, navigate])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { new: 0, saved: 0, tailoring_resume: 0, applied: 0, recruiter_screen: 0, technical_interview: 0, final: 0, offer: 0, rejected: 0 }
@@ -126,6 +144,7 @@ export default function DashboardScreen() {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
+      <SetupBanner />
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Job Search Command Center</h1>

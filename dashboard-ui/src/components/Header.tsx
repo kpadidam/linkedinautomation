@@ -2,12 +2,14 @@ import { FiSun, FiMoon, FiPlay, FiSquare, FiAlertTriangle, FiRefreshCw, FiSkipFo
 import { Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import { useSessionStatus, useStartSession, useStopSession, useResetSession } from '@/hooks/useSession'
+import { useSetupStatus } from '@/hooks/useSetup'
 import { useSettingsDirty } from '@/lib/settingsDirty'
 import { cn } from '@/lib/utils'
 
 export function Header() {
   const { theme, toggle } = useTheme()
   const { data: status } = useSessionStatus()
+  const { data: setup } = useSetupStatus()
   const start = useStartSession()
   const stop = useStopSession()
   const reset = useResetSession()
@@ -15,13 +17,20 @@ export function Header() {
   const running = !!status?.running
   const pending = status?.pending_progress ?? null
   const canResume = !running && !!pending
+  const setupBlocked = !!setup && !setup.complete
+
+  const missingLabels = setup
+    ? setup.items.filter((i) => !i.complete && !i.optional).map((i) => i.label)
+    : []
 
   const startLabel = canResume
     ? `Resume · ${pending!.completed_index + 1}/${pending!.total_categories}`
     : 'Start session'
-  const startTitle = canResume
-    ? `Resume from category ${pending!.completed_index + 2} of ${pending!.total_categories} (started ${new Date(pending!.started_at).toLocaleString()})`
-    : 'Start a fresh scraping session'
+  const startTitle = setupBlocked
+    ? `Setup incomplete: ${missingLabels.join(' · ')}`
+    : canResume
+      ? `Resume from category ${pending!.completed_index + 2} of ${pending!.total_categories} (started ${new Date(pending!.started_at).toLocaleString()})`
+      : 'Start a fresh scraping session'
 
   const handleReset = () => {
     if (!confirm('Discard saved progress and start the next run from scratch?')) return
@@ -62,10 +71,20 @@ export function Header() {
           </button>
         ) : (
           <>
+            {setupBlocked ? (
+              <Link
+                to="/setup"
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/60 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                title={startTitle}
+              >
+                <FiAlertTriangle className="h-4 w-4" />
+                Finish setup
+              </Link>
+            ) : null}
             <button
               className="btn-primary"
               onClick={() => start.mutate()}
-              disabled={start.isPending}
+              disabled={start.isPending || setupBlocked}
               title={startTitle}
             >
               {canResume ? <FiSkipForward className="h-4 w-4" /> : <FiPlay className="h-4 w-4" />}

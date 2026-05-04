@@ -13,6 +13,7 @@ import SearchRolesScreen from '@/screens/settings/SearchRolesScreen'
 import IntegrationsScreen from '@/screens/settings/IntegrationsScreen'
 import AutomationScreen from '@/screens/settings/AutomationScreen'
 import SystemScreen from '@/screens/settings/SystemScreen'
+import SetupScreen from '@/screens/SetupScreen'
 import { applyTheme, useTheme } from '@/hooks/useTheme'
 
 export default function App() {
@@ -22,6 +23,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* First-run wizard renders without the AppShell (no sidebar/header). */}
+        <Route path="setup" element={<SetupScreen />} />
         <Route element={<AppShell />}>
           <Route index element={<DashboardScreen />} />
           <Route path="review-queue" element={<ReviewQueueScreen />} />

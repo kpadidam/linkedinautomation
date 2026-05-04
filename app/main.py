@@ -7,6 +7,19 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 
 
+def _effective_frequency_minutes(profile) -> int:
+    """Resolve the active auto-search cadence in minutes.
+
+    ``search_frequency_minutes`` is the canonical field; ``search_frequency_hours``
+    is the legacy fallback. Floors at 1 minute defensively.
+    """
+    m = getattr(profile, "search_frequency_minutes", None)
+    if m is not None and m > 0:
+        return max(1, int(m))
+    h = getattr(profile, "search_frequency_hours", None) or 24
+    return max(1, int(h) * 60)
+
+
 def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
     """Serialize a naive UTC datetime as an ISO string the browser will
     correctly parse as UTC. ``datetime.utcnow().isoformat()`` produces
@@ -122,6 +135,7 @@ class SettingsUpdateRequest(BaseModel):
     browser_timeout: Optional[int] = None
     auto_search_enabled: Optional[bool] = None
     search_frequency_hours: Optional[int] = None
+    search_frequency_minutes: Optional[int] = None
     min_match_score_alert: Optional[float] = None
     email_notifications: Optional[bool] = None
     # Secrets: empty string => clear (use .env fallback). null => no change.
@@ -146,6 +160,7 @@ def _run_sqlite_migrations() -> None:
         ("user_profile", "browser_timeout", "INTEGER DEFAULT 30000"),
         ("user_profile", "last_completed_category_index", "INTEGER DEFAULT -1"),
         ("user_profile", "pending_search_started_at", "DATETIME"),
+        ("user_profile", "search_frequency_minutes", "INTEGER"),
         # Secrets (DB-first, .env fallback)
         ("user_profile", "openai_api_key", "TEXT"),
         ("user_profile", "groq_api_key", "TEXT"),
@@ -182,9 +197,12 @@ async def _auto_search_loop():
     Setup-incomplete and currently-running cases are no-ops so the loop
     never fights with manual control.
     """
+    # Tick every 15s so a 2-minute test cadence still fires roughly on time
+    # (worst-case 14s late). At hour-scale cadences this is invisible.
+    TICK_SECONDS = 15
     while True:
         try:
-            await asyncio.sleep(60)
+            await asyncio.sleep(TICK_SECONDS)
             if session_manager.is_running:
                 continue
             db = next(get_db())
@@ -197,15 +215,15 @@ async def _auto_search_loop():
                 # they finish setup.
                 if not _setup_doc(db)["complete"]:
                     continue
-                freq_h = int(profile.search_frequency_hours or 24)
+                freq_min = _effective_frequency_minutes(profile)
                 last = profile.last_auto_search
                 due = last is None or (
-                    datetime.utcnow() - last >= timedelta(hours=freq_h)
+                    datetime.utcnow() - last >= timedelta(minutes=freq_min)
                 )
                 if not due:
                     continue
                 logger.info(
-                    f"Auto-trigger firing (last={last}, frequency={freq_h}h)"
+                    f"Auto-trigger firing (last={last}, frequency={freq_min}m)"
                 )
                 profile.last_auto_search = datetime.utcnow()
                 db.commit()
@@ -557,6 +575,9 @@ def _settings_doc(profile) -> Dict[str, Any]:
         ),
         "auto_search_enabled": bool(profile.auto_search_enabled),
         "search_frequency_hours": int(profile.search_frequency_hours or 24),
+        # Effective minute-level cadence (resolves the new field, falling
+        # back to hours*60). Frontend should prefer this for display + edit.
+        "search_frequency_minutes": _effective_frequency_minutes(profile),
         "min_match_score_alert": float(profile.min_match_score_alert or 0.0),
         "email_notifications": bool(profile.email_notifications),
         "secrets": {
@@ -749,13 +770,16 @@ def _next_trigger_payload(db: Session) -> Optional[Dict[str, Any]]:
     profile = db_manager.get_or_create_user_profile(db)
     if not profile.auto_search_enabled:
         return None
-    freq_h = int(profile.search_frequency_hours or 24)
+    freq_min = _effective_frequency_minutes(profile)
     base = profile.last_auto_search or datetime.utcnow()
-    next_at = base + timedelta(hours=freq_h)
+    next_at = base + timedelta(minutes=freq_min)
     secs = (next_at - datetime.utcnow()).total_seconds()
     return {
         "next_at": _utc_iso(next_at),
-        "frequency_hours": freq_h,
+        "frequency_minutes": freq_min,
+        # Kept for backward compat — older clients read this. New clients
+        # should prefer ``frequency_minutes`` for sub-hour cadences.
+        "frequency_hours": max(1, round(freq_min / 60)),
         "seconds_until": int(secs),
         "last_run_at": _utc_iso(profile.last_auto_search),
     }

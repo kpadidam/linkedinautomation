@@ -147,10 +147,17 @@ export function Header() {
       0,
       Math.floor((new Date(trigger.next_at).getTime() - now) / 1000),
     )
+    // Render the cadence in the most readable unit: <60m as "Nm",
+    // hour-multiples as "Nh", anything else as "Xh Ym".
+    const m = trigger.frequency_minutes
+    let cadence: string
+    if (m < 60) cadence = `${m}m`
+    else if (m % 60 === 0) cadence = `${m / 60}h`
+    else cadence = `${Math.floor(m / 60)}h ${m % 60}m`
     statusLine = (
       <>
         <FiZap className="h-3.5 w-3.5 opacity-70 shrink-0" />
-        Trigger every {trigger.frequency_hours}h · next in{' '}
+        Trigger every {cadence} · next in{' '}
         <span className="font-mono tabular-nums">{fmtElapsed(secsUntil)}</span>
       </>
     )

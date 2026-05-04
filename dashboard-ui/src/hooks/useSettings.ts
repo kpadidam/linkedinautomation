@@ -19,7 +19,10 @@ export interface AppSettings {
   headless_browser: boolean
   browser_timeout: number
   auto_search_enabled: boolean
+  /** Legacy hour-precision cadence. Prefer ``search_frequency_minutes``. */
   search_frequency_hours: number
+  /** Effective minute-precision cadence (canonical). */
+  search_frequency_minutes: number
   min_match_score_alert: number
   email_notifications: boolean
   secrets: AppSettingsSecrets
@@ -31,6 +34,7 @@ export interface AppSettingsUpdate {
   browser_timeout?: number
   auto_search_enabled?: boolean
   search_frequency_hours?: number
+  search_frequency_minutes?: number
   min_match_score_alert?: number
   email_notifications?: boolean
   // Secrets — empty string clears (falls back to .env). undefined = no change.

@@ -193,9 +193,15 @@ class UserProfile(Base):
     search_roles = Column(JSON, nullable=True)  # Roles to scrape (overrides job_search_config.json)
     minimum_salary = Column(String(50), nullable=True)
     
-    # Search preferences
+    # Search preferences. ``search_frequency_minutes`` is the canonical knob;
+    # it lets us pick sub-hour cadences (down to single-minute for testing).
+    # The legacy ``search_frequency_hours`` column stays as a fallback so old
+    # rows / .env-bootstrapped values keep working until we explicitly retire
+    # them. Backend resolution: minutes wins when non-null/positive, else
+    # hours * 60.
     auto_search_enabled = Column(Boolean, default=False)
     search_frequency_hours = Column(Integer, default=24)
+    search_frequency_minutes = Column(Integer, nullable=True)
     last_auto_search = Column(DateTime, nullable=True)
     
     # Notification preferences

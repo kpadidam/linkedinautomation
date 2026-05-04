@@ -11,7 +11,8 @@ export interface PendingProgress {
 
 export interface NextTrigger {
   next_at: string            // ISO datetime
-  frequency_hours: number
+  frequency_hours: number    // legacy/back-compat (rounded)
+  frequency_minutes: number  // canonical, sub-hour-aware
   seconds_until: number      // negative if overdue
   last_run_at: string | null
 }

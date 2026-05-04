@@ -201,7 +201,12 @@ class UserProfile(Base):
     # Notification preferences
     email_notifications = Column(Boolean, default=False)
     min_match_score_alert = Column(Float, default=80.0)
-    
+
+    # Feature flags / scraper toggles (persisted; UI-editable)
+    enable_resume_matching = Column(Boolean, default=True)
+    headless_browser = Column(Boolean, default=True)
+    browser_timeout = Column(Integer, default=30000)
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -264,9 +269,10 @@ class InterviewEvent(Base):
     id = Column(Integer, primary_key=True)
     job_id = Column(String(100), nullable=False, index=True)
     stage = Column(String(50), nullable=False)  # phone, tech, onsite, offer, …
-    scheduled_at = Column(DateTime, nullable=False)
+    scheduled_at = Column(DateTime, nullable=False)  # stored as UTC
     location = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
+    interviewer_tz = Column(String(64), nullable=True)  # IANA tz, e.g. "America/New_York"
     created_at = Column(DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -277,6 +283,7 @@ class InterviewEvent(Base):
             "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
             "location": self.location,
             "notes": self.notes,
+            "interviewer_tz": self.interviewer_tz,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

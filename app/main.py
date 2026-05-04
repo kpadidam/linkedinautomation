@@ -15,9 +15,10 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from config import settings, STATIC_DIR, LOGGING_CONFIG
-from database.models import get_db, Job, SearchRun
+from database.models import get_db, Job, SearchRun, init_db, engine
+from sqlalchemy import text
 from database.db_manager import db_manager
-from scrapers.linkedin_scraper import LinkedInScraper, JobSearchParams
+from scrapers.linkedin_scraper_robust import RobustLinkedInScraper
 from services.google_sheets_service import GoogleSheetsService
 from services.resume_matcher import ResumeMatcherService, ResumeProfile
 from services.session_manager import SessionManager
@@ -39,7 +40,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,11 +94,69 @@ class ProfileUpdateRequest(BaseModel):
     search_roles: Optional[List[str]] = None
 
 
+class SettingsUpdateRequest(BaseModel):
+    """Partial-update payload for /api/settings.
+
+    All fields optional so the UI can PATCH-style send any subset. Secret-bearing
+    config (API keys, LinkedIn creds, sheet ID) is intentionally read-only here
+    and exposed via boolean ``*_configured`` flags only.
+    """
+    enable_resume_matching: Optional[bool] = None
+    headless_browser: Optional[bool] = None
+    browser_timeout: Optional[int] = None
+    auto_search_enabled: Optional[bool] = None
+    search_frequency_hours: Optional[int] = None
+    min_match_score_alert: Optional[float] = None
+    email_notifications: Optional[bool] = None
+
+
+def _run_sqlite_migrations() -> None:
+    """Idempotent SQLite column migrations.
+
+    SQLAlchemy's ``create_all`` adds new tables but never alters existing ones,
+    so when we add columns to a model we must ALTER the live DB ourselves.
+    For each (table, column, type) we check ``PRAGMA table_info`` and only
+    issue ``ALTER TABLE ... ADD COLUMN`` when the column is missing. Errors
+    are logged and swallowed so a partial failure can't block app startup.
+    """
+    targets = [
+        ("user_profile", "enable_resume_matching", "BOOLEAN DEFAULT 1"),
+        ("user_profile", "headless_browser", "BOOLEAN DEFAULT 1"),
+        ("user_profile", "browser_timeout", "INTEGER DEFAULT 30000"),
+        ("interview_events", "interviewer_tz", "VARCHAR(64)"),
+    ]
+    try:
+        with engine.begin() as conn:
+            for table, col, coltype in targets:
+                try:
+                    rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+                    existing = {r[1] for r in rows}  # row[1] is column name
+                    if not rows:
+                        # Table not created yet (e.g. fresh DB). create_all handles it.
+                        continue
+                    if col in existing:
+                        continue
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
+                    logger.info(f"Migration: added {table}.{col}")
+                except Exception as inner:  # noqa: BLE001
+                    logger.warning(f"Migration skipped for {table}.{col}: {inner}")
+    except Exception as outer:  # noqa: BLE001
+        logger.warning(f"SQLite migration helper failed: {outer}")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
     global google_sheets_service, resume_matcher_service
-    
+
+    # Ensure schema exists, then run additive column migrations before any
+    # request can hit a model expecting the new columns.
+    try:
+        init_db()
+    except Exception as e:
+        logger.error(f"init_db failed at startup: {e}")
+    _run_sqlite_migrations()
+
     try:
         # Initialize Google Sheets service
         if settings.google_sheets_id:
@@ -178,67 +237,58 @@ async def search_jobs(
 async def perform_job_search(search_id: str, params: Dict[str, Any]):
     """
     Perform the actual job search (runs in background).
-    
-    Args:
-        search_id: Search run ID
-        params: Search parameters
+
+    Uses ``RobustLinkedInScraper.run_full_search`` which expects a list of
+    category dicts (keywords/location/etc) rather than a single keyword string.
+    The /api/search request is shaped as a single JobSearchRequest, so we
+    translate it into a one-element category list. Resume-matching and Sheets
+    logging are handled inside the scraper itself.
     """
     db = next(get_db())
-    
+
     try:
         logger.info(f"Starting job search {search_id}")
-        
-        # Initialize scraper
-        scraper = LinkedInScraper()
-        
-        # Create search parameters
-        search_params = JobSearchParams(**params)
-        
-        # Perform search
-        jobs = await scraper.search_jobs(search_params)
-        
-        # Update search run
-        db_manager.update_search_run(
-            search_id, db,
-            total_results=len(jobs),
-            jobs_scraped=len(jobs)
+
+        # Pull DB-persisted feature flag so UI changes propagate to this run.
+        profile = db_manager.get_or_create_user_profile(db)
+        enable_match_db = profile.enable_resume_matching
+        if enable_match_db is None:
+            enable_match_db = settings.enable_resume_matching
+
+        # Translate JobSearchRequest -> RobustLinkedInScraper category schema.
+        category = {
+            "category": params.get("keywords", "search"),
+            "keywords": [params.get("keywords")] if params.get("keywords") else [],
+            "location": params.get("location") or settings.default_location,
+            "max_results": params.get("max_results", 20),
+            "posted_within": params.get("posted_within") or "24h",
+        }
+        if params.get("job_type"):
+            category["job_type"] = params["job_type"]
+        if params.get("experience_level"):
+            category["experience_level"] = params["experience_level"]
+        if params.get("remote") is not None:
+            category["remote"] = params["remote"]
+
+        # Honor request-level enable_matching as an additional disable switch.
+        effective_match = bool(enable_match_db) and bool(params.get("enable_matching", True))
+        scraper = RobustLinkedInScraper(enable_resume_matching=effective_match)
+
+        jobs = await scraper.run_full_search([category])
+
+        matched_jobs = sum(
+            1 for j in jobs if (j.get("resume_match_score") or 0) >= 70
         )
-        
-        # Process each job
-        matched_jobs = 0
-        for job_data in jobs:
-            try:
-                # Create JobListing object
-                job_listing = JobListing(**job_data)
-                
-                # Perform resume matching if enabled (also requires global feature flag)
-                if settings.enable_resume_matching and params.get("enable_matching") and resume_matcher_service:
-                    analysis = await resume_matcher_service.analyze_job_fit(job_listing)
-                    job_listing.resume_match_score = analysis.overall_match_score
-                    job_listing.keywords = analysis.technical_skills + analysis.soft_skills
-                    job_listing.skills = analysis.technical_skills
-                    
-                    if analysis.overall_match_score >= 70:
-                        matched_jobs += 1
-                
-                # Save to database
-                db_manager.add_job(job_listing, db)
-                
-                # Save to Google Sheets if enabled
-                if params.get("save_to_sheets") and google_sheets_service:
-                    google_sheets_service.add_job(job_listing)
-                
-            except Exception as e:
-                logger.error(f"Failed to process job: {e}")
-                continue
-        
+
         # Update search run as completed
         db_manager.update_search_run(
             search_id, db,
+            total_results=len(jobs),
+            jobs_scraped=len(jobs),
             status="completed",
-            jobs_matched=matched_jobs
+            jobs_matched=matched_jobs,
         )
-        
+
         logger.info(f"Search {search_id} completed: {len(jobs)} jobs found, {matched_jobs} matched")
         
     except Exception as e:
@@ -354,6 +404,66 @@ async def update_profile(
     return {"status": "success", "message": "Profile updated"}
 
 
+def _settings_doc(profile) -> Dict[str, Any]:
+    """Build the canonical /api/settings response from a UserProfile row.
+
+    ``secrets`` only ever returns booleans — never the underlying value — so
+    this endpoint is safe for the frontend to fetch unauthenticated locally.
+    """
+    return {
+        "enable_resume_matching": (
+            bool(profile.enable_resume_matching)
+            if profile.enable_resume_matching is not None
+            else True
+        ),
+        "headless_browser": (
+            bool(profile.headless_browser)
+            if profile.headless_browser is not None
+            else True
+        ),
+        "browser_timeout": (
+            int(profile.browser_timeout)
+            if profile.browser_timeout is not None
+            else 30000
+        ),
+        "auto_search_enabled": bool(profile.auto_search_enabled),
+        "search_frequency_hours": int(profile.search_frequency_hours or 24),
+        "min_match_score_alert": float(profile.min_match_score_alert or 0.0),
+        "email_notifications": bool(profile.email_notifications),
+        "secrets": {
+            "openai_configured": bool(getattr(settings, "openai_api_key", None)),
+            "groq_configured": bool(getattr(settings, "groq_api_key", None)),
+            "linkedin_configured": bool(
+                getattr(settings, "linkedin_email", None)
+                and getattr(settings, "linkedin_password", None)
+            ),
+            "sheets_configured": bool(getattr(settings, "google_sheets_id", None)),
+        },
+    }
+
+
+@app.get("/api/settings")
+async def get_settings(db: Session = Depends(get_db)):
+    """Return persisted UI-editable settings + read-only secret status flags."""
+    profile = db_manager.get_or_create_user_profile(db)
+    return _settings_doc(profile)
+
+
+@app.put("/api/settings")
+async def update_settings(
+    request: SettingsUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Persist a partial settings update; returns the full updated doc."""
+    updates = request.dict(exclude_unset=True)
+    if updates:
+        success = db_manager.update_user_profile(db, **updates)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update settings")
+    profile = db_manager.get_or_create_user_profile(db)
+    return _settings_doc(profile)
+
+
 @app.get("/api/statistics")
 async def get_statistics(db: Session = Depends(get_db)):
     """Get application statistics."""
@@ -458,12 +568,14 @@ class InterviewCreate(BaseModel):
     scheduled_at: datetime
     location: Optional[str] = None
     notes: Optional[str] = None
+    interviewer_tz: Optional[str] = None
 
 class InterviewUpdate(BaseModel):
     stage: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     location: Optional[str] = None
     notes: Optional[str] = None
+    interviewer_tz: Optional[str] = None
 
 
 @app.get("/api/followups")
@@ -512,6 +624,7 @@ async def create_interview(payload: InterviewCreate, db: Session = Depends(get_d
     e = InterviewEvent(
         job_id=payload.job_id, stage=payload.stage,
         scheduled_at=payload.scheduled_at, location=payload.location, notes=payload.notes,
+        interviewer_tz=payload.interviewer_tz,
     )
     db.add(e); db.commit(); db.refresh(e)
     return e.to_dict()

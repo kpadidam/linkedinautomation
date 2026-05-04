@@ -50,13 +50,27 @@ class JobSearchParams(BaseModel):
 class RobustLinkedInScraper:
     """Enhanced LinkedIn job scraper with comprehensive error handling and retry logic."""
     
-    def __init__(self):
-        """Initialize the robust LinkedIn scraper."""
+    def __init__(self, enable_resume_matching: Optional[bool] = None):
+        """Initialize the robust LinkedIn scraper.
+
+        Args:
+            enable_resume_matching: If provided, overrides the env-driven
+                ``settings.enable_resume_matching`` for this scraper instance.
+                When ``None`` (default), falls back to the env value so existing
+                callers continue to work unchanged.
+        """
         self.browser: Optional[Browser] = None
         self.page: Optional[Page] = None
         self.jobs_scraped = []
         self.resume_matcher = None
         self.google_sheets = None
+
+        # Resolve resume-matching flag: explicit constructor arg wins; otherwise env.
+        self.enable_resume_matching = (
+            enable_resume_matching
+            if enable_resume_matching is not None
+            else settings.enable_resume_matching
+        )
         
         # Enhanced utilities
         self.element_finder: Optional[SafeElementFinder] = None
@@ -106,7 +120,7 @@ class RobustLinkedInScraper:
             self.navigator = LinkedInNavigator(self.page)
             
             # Initialize resume matcher (gated by feature flag to avoid LLM cost)
-            if settings.enable_resume_matching and settings.resume_file_path:
+            if self.enable_resume_matching and settings.resume_file_path:
                 resume_profile = ResumeProfile(
                     resume_file=settings.resume_file_path,
                     skills=settings.skills_list

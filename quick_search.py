@@ -49,6 +49,8 @@ class JobSearchAutomation:
         # Try DB-stored roles first
         user_roles = []
         user_location = "United States"
+        # Default to env-level setting; DB override applied below.
+        self.enable_resume_matching = settings.enable_resume_matching
         try:
             from database.models import SessionLocal
             from database.db_manager import db_manager
@@ -58,10 +60,13 @@ class JobSearchAutomation:
                 user_roles = list(profile.search_roles or [])
                 if profile.preferred_locations:
                     user_location = profile.preferred_locations[0]
+                # Pull persisted feature flag (UI-editable). Fallback to env.
+                if profile.enable_resume_matching is not None:
+                    self.enable_resume_matching = bool(profile.enable_resume_matching)
             finally:
                 db.close()
         except Exception as e:
-            logger.warning(f"Could not load search_roles from DB: {e}")
+            logger.warning(f"Could not load profile settings from DB: {e}")
 
         if user_roles:
             self.job_config = {
@@ -93,8 +98,10 @@ class JobSearchAutomation:
         print("="*60)
         
         try:
-            # Initialize the Robust LinkedIn scraper
-            scraper = RobustLinkedInScraper()
+            # Initialize the Robust LinkedIn scraper with DB-driven flags
+            scraper = RobustLinkedInScraper(
+                enable_resume_matching=self.enable_resume_matching
+            )
             
             # Run full search with all categories
             all_jobs = await scraper.run_full_search(self.job_config['job_categories'])

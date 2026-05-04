@@ -15,6 +15,7 @@ import {
 } from 'react-icons/fi'
 import { useJobs, useStatistics, useSearches } from '@/hooks/useJobs'
 import { useFollowups } from '@/hooks/useInterviews'
+import { useSettings } from '@/hooks/useSettings'
 import { StatCard } from '@/components/StatCard'
 import { JobDetailDrawer } from '@/features/jobs/JobDetailDrawer'
 import { PIPELINE_STAGES } from '@/lib/types'
@@ -28,6 +29,8 @@ export default function DashboardScreen() {
   const { data: searches = [] } = useSearches(3)
   const { data: jobs = [] } = useJobs({ limit: 500 })
   const { data: followups = [] } = useFollowups()
+  const { data: settings } = useSettings()
+  const matchingEnabled = settings?.enable_resume_matching ?? true
   const [openId, setOpenId] = useState<string | null>(null)
 
   const counts = useMemo(() => {
@@ -144,7 +147,9 @@ export default function DashboardScreen() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard label="New jobs" value={newRecent} icon={FiInbox} hint="last 24h" />
-        <StatCard label="High matches" value={stats?.high_match_jobs ?? 0} icon={FiActivity} hint={`≥ ${HIGH_MATCH}%`} />
+        {matchingEnabled ? (
+          <StatCard label="High matches" value={stats?.high_match_jobs ?? 0} icon={FiActivity} hint={`≥ ${HIGH_MATCH}%`} />
+        ) : null}
         <StatCard label="Saved" value={counts.saved} icon={FiBookmark} />
         <StatCard label="Applied" value={counts.applied} icon={FiSend} />
         <StatCard
@@ -152,11 +157,13 @@ export default function DashboardScreen() {
           value={counts.recruiter_screen + counts.technical_interview + counts.final}
           icon={FiCalendar}
         />
-        <StatCard
-          label="Avg match"
-          value={stats?.average_match_score != null ? `${Math.round(stats.average_match_score)}%` : '—'}
-          icon={FiPercent}
-        />
+        {matchingEnabled ? (
+          <StatCard
+            label="Avg match"
+            value={stats?.average_match_score != null ? `${Math.round(stats.average_match_score)}%` : '—'}
+            icon={FiPercent}
+          />
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -190,7 +197,15 @@ export default function DashboardScreen() {
               See all →
             </Link>
           </div>
-          {bestNewMatches.length === 0 ? (
+          {!matchingEnabled ? (
+            <div className="text-sm text-zinc-500 py-6 text-center">
+              Enable matching in{' '}
+              <Link to="/settings/system" className="text-brand-600 hover:underline">
+                Settings → System
+              </Link>{' '}
+              to see matches.
+            </div>
+          ) : bestNewMatches.length === 0 ? (
             <div className="text-sm text-zinc-500 py-6 text-center">No new jobs to review.</div>
           ) : (
             <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -208,7 +223,7 @@ export default function DashboardScreen() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {j.resume_match_score != null ? (
+                      {matchingEnabled && j.resume_match_score != null ? (
                         <span className={cn('chip text-xs', scoreColor(j.resume_match_score))}>
                           {Math.round(j.resume_match_score)}%
                         </span>

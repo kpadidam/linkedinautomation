@@ -1,6 +1,7 @@
 import { FiX, FiExternalLink, FiBookmark, FiMapPin, FiClock, FiUsers, FiDollarSign, FiFileText, FiCalendar, FiSend, FiSlash } from 'react-icons/fi'
 import { useEffect, useRef, useState } from 'react'
 import { useJob, useUpdateJob } from '@/hooks/useJobs'
+import { useSettings } from '@/hooks/useSettings'
 import { JobLabels } from './JobLabels'
 import { FollowupList } from '@/features/bookmarks/FollowupList'
 import { InterviewList } from '@/features/interviews/InterviewList'
@@ -12,6 +13,8 @@ const ALL_STATUSES = ['new', ...PIPELINE_STAGES.map((s) => s.id)]
 export function JobDetailDrawer({ jobId, onClose }: { jobId: string | null; onClose: () => void }) {
   const { data: job } = useJob(jobId)
   const update = useUpdateJob()
+  const { data: settings } = useSettings()
+  const matchingEnabled = settings?.enable_resume_matching ?? true
   const [notes, setNotes] = useState('')
   const followupRef = useRef<HTMLElement | null>(null)
 
@@ -72,7 +75,7 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string | null; onCl
                     <h2 className="text-xl font-semibold leading-tight">{job.title}</h2>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{job.company}</div>
                   </div>
-                  {job.resume_match_score != null ? (
+                  {matchingEnabled && job.resume_match_score != null ? (
                     <span className={cn('chip text-sm font-semibold', scoreColor(job.resume_match_score))}>
                       {Math.round(job.resume_match_score)}% match
                     </span>
@@ -123,7 +126,7 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string | null; onCl
                 </div>
               </Section>
 
-              {job.match_reasons && job.match_reasons.length > 0 ? (
+              {matchingEnabled && job.match_reasons && job.match_reasons.length > 0 ? (
                 <Section title="Why it matches">
                   <ul className="space-y-1 text-sm">
                     {job.match_reasons.map((r, i) => (
@@ -136,7 +139,7 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string | null; onCl
                 </Section>
               ) : null}
 
-              {job.resume_gaps && job.resume_gaps.length > 0 ? (
+              {matchingEnabled && job.resume_gaps && job.resume_gaps.length > 0 ? (
                 <Section title="Resume gaps">
                   <ul className="space-y-1 text-sm">
                     {job.resume_gaps.map((g, i) => (

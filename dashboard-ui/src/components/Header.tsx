@@ -1,7 +1,8 @@
-import { FiSun, FiMoon, FiPlay, FiSquare } from 'react-icons/fi'
+import { FiSun, FiMoon, FiPlay, FiSquare, FiAlertTriangle } from 'react-icons/fi'
 import { Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import { useSessionStatus, useStartSession, useStopSession } from '@/hooks/useSession'
+import { useSettingsDirty } from '@/lib/settingsDirty'
 import { cn } from '@/lib/utils'
 
 export function Header() {
@@ -9,6 +10,7 @@ export function Header() {
   const { data: status } = useSessionStatus()
   const start = useStartSession()
   const stop = useStopSession()
+  const dirty = useSettingsDirty((s) => s.dirty)
   const running = !!status?.running
 
   return (
@@ -25,6 +27,16 @@ export function Header() {
         </span>
       </Link>
       <div className="flex items-center gap-2">
+        {dirty && running ? (
+          <Link
+            to="/session"
+            className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/60 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/40"
+            title="Settings changed since this session started. Restart to apply."
+          >
+            <FiAlertTriangle className="h-3.5 w-3.5" />
+            Restart Session to apply settings
+          </Link>
+        ) : null}
         {running ? (
           <button className="btn-danger" onClick={() => stop.mutate()} disabled={stop.isPending}>
             <FiSquare className="h-4 w-4" /> Stop

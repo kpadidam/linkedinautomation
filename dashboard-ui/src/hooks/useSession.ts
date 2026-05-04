@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { clearSettingsDirty } from '@/lib/settingsDirty'
 
 export interface SessionStatus {
   running: boolean
@@ -27,7 +28,10 @@ export function useStartSession() {
       const r = await fetch('/api/sessions/start', { method: 'POST' })
       return r.json()
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),
+    onSuccess: () => {
+      clearSettingsDirty()
+      qc.invalidateQueries({ queryKey: ['session-status'] })
+    },
   })
 }
 

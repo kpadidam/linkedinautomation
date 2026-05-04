@@ -1,19 +1,59 @@
 import { useMemo, useState } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useDroppable, useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
-import { FiExternalLink, FiAlertTriangle, FiArrowRight } from 'react-icons/fi'
+import { FiExternalLink, FiAlertTriangle, FiArrowRight, FiCalendar } from 'react-icons/fi'
 import { useJobs, useUpdateJob } from '@/hooks/useJobs'
+import { useInterviews } from '@/hooks/useInterviews'
+import { useSettings } from '@/hooks/useSettings'
 import { PIPELINE_STAGES, type Job } from '@/lib/types'
+import type { Interview } from '@/lib/types.interviews'
 import { cn, daysSince, nextActionFor, scoreColor, statusColor } from '@/lib/utils'
 import { JobDetailDrawer } from '@/features/jobs/JobDetailDrawer'
+import { ScheduleInterviewModal } from '@/features/interviews/ScheduleInterviewModal'
 
 const STAGE_IDS = PIPELINE_STAGES.map((s) => s.id)
 
+const KANBAN_TO_INTERVIEW_STAGE: Record<string, string> = {
+  recruiter_screen: 'phone',
+  technical_interview: 'tech',
+  final: 'onsite',
+  offer: 'offer',
+}
+
+const INTERVIEW_STAGE_COLUMNS = new Set([
+  'recruiter_screen',
+  'technical_interview',
+  'final',
+])
+
+interface ScheduleContext {
+  jobId: string
+  initialStage: string
+}
+
 export default function PipelineScreen() {
   const { data: jobs = [] } = useJobs({ limit: 500 })
+  const { data: interviews = [] } = useInterviews()
   const update = useUpdateJob()
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [scheduleCtx, setScheduleCtx] = useState<ScheduleContext | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  const interviewsByJob = useMemo(() => {
+    const m = new Map<string, Interview[]>()
+    for (const e of interviews) {
+      const arr = m.get(e.job_id) || []
+      arr.push(e)
+      m.set(e.job_id, arr)
+    }
+    for (const arr of m.values()) {
+      arr.sort(
+        (a, b) =>
+          new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime(),
+      )
+    }
+    return m
+  }, [interviews])
 
   const grouped = useMemo(() => {
     const g: Record<string, Job[]> = {}
@@ -59,18 +99,52 @@ export default function PipelineScreen() {
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="flex gap-3 overflow-x-auto pb-4 flex-1">
           {PIPELINE_STAGES.map((s) => (
-            <Column key={s.id} id={s.id} label={s.label} jobs={grouped[s.id]} onOpen={setOpenId} />
+            <Column
+              key={s.id}
+              id={s.id}
+              label={s.label}
+              jobs={grouped[s.id]}
+              onOpen={setOpenId}
+              interviewsByJob={interviewsByJob}
+              onSchedule={(jobId) =>
+                setScheduleCtx({
+                  jobId,
+                  initialStage: KANBAN_TO_INTERVIEW_STAGE[s.id] ?? 'phone',
+                })
+              }
+            />
           ))}
         </div>
         <DragOverlay>{draggingJob ? <JobCard job={draggingJob} dragging /> : null}</DragOverlay>
       </DndContext>
       <JobDetailDrawer jobId={openId} onClose={() => setOpenId(null)} />
+      <ScheduleInterviewModal
+        open={scheduleCtx !== null}
+        onClose={() => setScheduleCtx(null)}
+        jobId={scheduleCtx?.jobId ?? null}
+        initialStage={scheduleCtx?.initialStage}
+      />
     </div>
   )
 }
 
-function Column({ id, label, jobs, onOpen }: { id: string; label: string; jobs: Job[]; onOpen: (jid: string) => void }) {
+function Column({
+  id,
+  label,
+  jobs,
+  onOpen,
+  interviewsByJob,
+  onSchedule,
+}: {
+  id: string
+  label: string
+  jobs: Job[]
+  onOpen: (jid: string) => void
+  interviewsByJob: Map<string, Interview[]>
+  onSchedule: (jobId: string) => void
+}) {
   const { isOver, setNodeRef } = useDroppable({ id })
+  const showSchedule = INTERVIEW_STAGE_COLUMNS.has(id) || id === 'offer'
   return (
     <div
       ref={setNodeRef}
@@ -90,14 +164,35 @@ function Column({ id, label, jobs, onOpen }: { id: string; label: string; jobs: 
         {jobs.length === 0 ? (
           <div className="text-xs text-zinc-400 text-center py-4">Drop here</div>
         ) : (
-          jobs.map((j) => <DraggableCard key={j.job_id} job={j} onOpen={() => onOpen(j.job_id)} />)
+          jobs.map((j) => (
+            <DraggableCard
+              key={j.job_id}
+              job={j}
+              rounds={interviewsByJob.get(j.job_id) || []}
+              showSchedule={showSchedule}
+              onOpen={() => onOpen(j.job_id)}
+              onSchedule={() => onSchedule(j.job_id)}
+            />
+          ))
         )}
       </div>
     </div>
   )
 }
 
-function DraggableCard({ job, onOpen }: { job: Job; onOpen: () => void }) {
+function DraggableCard({
+  job,
+  rounds,
+  showSchedule,
+  onOpen,
+  onSchedule,
+}: {
+  job: Job
+  rounds: Interview[]
+  showSchedule: boolean
+  onOpen: () => void
+  onSchedule: () => void
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: job.job_id })
   return (
     <div
@@ -107,16 +202,39 @@ function DraggableCard({ job, onOpen }: { job: Job; onOpen: () => void }) {
       onClick={onOpen}
       className={cn(isDragging && 'opacity-30')}
     >
-      <JobCard job={job} />
+      <JobCard
+        job={job}
+        rounds={rounds}
+        showSchedule={showSchedule}
+        onSchedule={onSchedule}
+      />
     </div>
   )
 }
 
-function JobCard({ job, dragging }: { job: Job; dragging?: boolean }) {
+function JobCard({
+  job,
+  dragging,
+  rounds = [],
+  showSchedule,
+  onSchedule,
+}: {
+  job: Job
+  dragging?: boolean
+  rounds?: Interview[]
+  showSchedule?: boolean
+  onSchedule?: () => void
+}) {
+  const { data: settings } = useSettings()
+  const matchingEnabled = settings?.enable_resume_matching ?? true
   const age = daysSince(job.last_updated || job.scraped_at)
   const isStale = age != null && age >= 7 && job.status !== 'rejected' && job.status !== 'offer'
   const isHighMatchUnapplied =
-    job.status === 'saved' && (job.resume_match_score ?? 0) >= 85
+    matchingEnabled && job.status === 'saved' && (job.resume_match_score ?? 0) >= 85
+  const nextRound = rounds.find((r) => new Date(r.scheduled_at).getTime() >= Date.now())
+  const lastRound = rounds[rounds.length - 1]
+  const upcomingRound = nextRound || lastRound
+  const nextRoundNumber = rounds.length + 1
   return (
     <div
       className={cn(
@@ -147,7 +265,7 @@ function JobCard({ job, dragging }: { job: Job; dragging?: boolean }) {
         ) : null}
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
-        {job.resume_match_score != null ? (
+        {matchingEnabled && job.resume_match_score != null ? (
           <span className={cn('chip text-[10px]', scoreColor(job.resume_match_score))}>
             {Math.round(job.resume_match_score)}%
           </span>
@@ -162,6 +280,36 @@ function JobCard({ job, dragging }: { job: Job; dragging?: boolean }) {
         <FiArrowRight className="h-3 w-3 text-brand-500" />
         {nextActionFor(job.status)}
       </div>
+      {showSchedule && onSchedule ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onSchedule()
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className={cn(
+            'mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded border px-2 py-1 text-[10px] transition-colors',
+            upcomingRound
+              ? 'border-brand-200 dark:border-brand-700/60 text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-700/10 hover:bg-brand-100 dark:hover:bg-brand-700/20'
+              : 'border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-brand-500 hover:text-brand-700 dark:hover:text-brand-300'
+          )}
+          title={
+            upcomingRound
+              ? `Round ${rounds.indexOf(upcomingRound) + 1} scheduled — click to add the next`
+              : `Schedule round ${nextRoundNumber}`
+          }
+        >
+          <FiCalendar className="h-3 w-3" />
+          {upcomingRound
+            ? `R${rounds.indexOf(upcomingRound) + 1} · ${new Date(
+                upcomingRound.scheduled_at,
+              ).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}${
+                rounds.length > 0 ? ` · + round ${nextRoundNumber}` : ''
+              }`
+            : `Schedule round ${nextRoundNumber}`}
+        </button>
+      ) : null}
       {(isStale || isHighMatchUnapplied) ? (
         <div className="mt-2 flex flex-wrap gap-1">
           {isStale ? (

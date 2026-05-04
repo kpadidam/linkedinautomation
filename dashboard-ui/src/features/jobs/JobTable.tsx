@@ -11,6 +11,7 @@ import { FiBookmark, FiTag, FiExternalLink, FiCopy, FiArrowRight } from 'react-i
 import type { Job } from '@/lib/types'
 import { cn, formatRelative, nextActionFor, scoreColor } from '@/lib/utils'
 import { useUpdateJob } from '@/hooks/useJobs'
+import { useSettings } from '@/hooks/useSettings'
 import { StatusSelect } from './StatusSelect'
 
 type GroupedJob = Job & { _dupCount?: number }
@@ -38,19 +39,60 @@ function groupDuplicates(jobs: Job[]): GroupedJob[] {
 export function JobTable({
   jobs,
   onRowClick,
+  selectedIds,
+  allVisibleSelected,
+  onToggleOne,
+  onToggleAll,
 }: {
   jobs: Job[]
   onRowClick: (jobId: string) => void
+  selectedIds?: Set<string>
+  allVisibleSelected?: boolean
+  onToggleOne?: (id: string) => void
+  onToggleAll?: () => void
 }) {
   const update = useUpdateJob()
+  const { data: settings } = useSettings()
+  // Default to enabled while loading so the UI doesn't flicker hidden→visible.
+  const matchingEnabled = settings?.enable_resume_matching ?? true
   const [sorting, setSorting] = useState<SortingState>([{ id: 'scraped_at', desc: true }])
   const [groupDupes, setGroupDupes] = useState(true)
 
   const data = useMemo(() => (groupDupes ? groupDuplicates(jobs) : jobs), [jobs, groupDupes])
   const dupesHidden = jobs.length - data.length
 
+  const enableSelection = !!selectedIds && !!onToggleOne && !!onToggleAll
+
   const columns = useMemo<ColumnDef<GroupedJob>[]>(
     () => [
+      ...(enableSelection
+        ? [
+            {
+              id: 'select',
+              size: 36,
+              header: () => (
+                <input
+                  type="checkbox"
+                  className="accent-brand-600 cursor-pointer"
+                  checked={!!allVisibleSelected}
+                  onChange={() => onToggleAll?.()}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Select all visible"
+                />
+              ),
+              cell: ({ row }: { row: { original: GroupedJob } }) => (
+                <input
+                  type="checkbox"
+                  className="accent-brand-600 cursor-pointer"
+                  checked={selectedIds?.has(row.original.job_id) ?? false}
+                  onChange={() => onToggleOne?.(row.original.job_id)}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Select row"
+                />
+              ),
+            } as ColumnDef<GroupedJob>,
+          ]
+        : []),
       {
         id: 'bookmark',
         header: '',
@@ -97,64 +139,68 @@ export function JobTable({
           </div>
         ),
       },
-      {
-        accessorKey: 'resume_match_score',
-        header: 'Match',
-        size: 80,
-        cell: ({ getValue }) => {
-          const v = getValue<number | null | undefined>()
-          if (v == null) return <span className="text-zinc-400 text-xs">—</span>
-          return <span className={cn('chip', scoreColor(v))}>{Math.round(v)}%</span>
-        },
-      },
-      {
-        id: 'why',
-        header: 'Why match',
-        size: 220,
-        cell: ({ row }) => {
-          const reasons = (row.original.match_reasons || []).slice(0, 3)
-          if (reasons.length === 0) {
-            const skills = (row.original.skills || []).slice(0, 3)
-            if (skills.length === 0) return <span className="text-zinc-400 text-xs">—</span>
-            return (
-              <div className="flex flex-wrap gap-1">
-                {skills.map((s) => (
-                  <span key={s} className="chip text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                    {s}
-                  </span>
-                ))}
-              </div>
-            )
-          }
-          return (
-            <div className="flex flex-wrap gap-1">
-              {reasons.map((r, i) => (
-                <span key={i} className="chip text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" title={r}>
-                  {r.length > 28 ? r.slice(0, 26) + '…' : r}
-                </span>
-              ))}
-            </div>
-          )
-        },
-      },
-      {
-        id: 'gaps',
-        header: 'Gaps',
-        size: 180,
-        cell: ({ row }) => {
-          const gaps = (row.original.resume_gaps || []).slice(0, 3)
-          if (gaps.length === 0) return <span className="text-zinc-400 text-xs">—</span>
-          return (
-            <div className="flex flex-wrap gap-1">
-              {gaps.map((g, i) => (
-                <span key={i} className="chip text-[10px] bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300" title={g}>
-                  {g.length > 22 ? g.slice(0, 20) + '…' : g}
-                </span>
-              ))}
-            </div>
-          )
-        },
-      },
+      ...(matchingEnabled
+        ? ([
+            {
+              accessorKey: 'resume_match_score',
+              header: 'Match',
+              size: 80,
+              cell: ({ getValue }) => {
+                const v = getValue<number | null | undefined>()
+                if (v == null) return <span className="text-zinc-400 text-xs">—</span>
+                return <span className={cn('chip', scoreColor(v))}>{Math.round(v)}%</span>
+              },
+            },
+            {
+              id: 'why',
+              header: 'Why match',
+              size: 220,
+              cell: ({ row }: { row: { original: GroupedJob } }) => {
+                const reasons = (row.original.match_reasons || []).slice(0, 3)
+                if (reasons.length === 0) {
+                  const skills = (row.original.skills || []).slice(0, 3)
+                  if (skills.length === 0) return <span className="text-zinc-400 text-xs">—</span>
+                  return (
+                    <div className="flex flex-wrap gap-1">
+                      {skills.map((s) => (
+                        <span key={s} className="chip text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )
+                }
+                return (
+                  <div className="flex flex-wrap gap-1">
+                    {reasons.map((r, i) => (
+                      <span key={i} className="chip text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" title={r}>
+                        {r.length > 28 ? r.slice(0, 26) + '…' : r}
+                      </span>
+                    ))}
+                  </div>
+                )
+              },
+            },
+            {
+              id: 'gaps',
+              header: 'Gaps',
+              size: 180,
+              cell: ({ row }: { row: { original: GroupedJob } }) => {
+                const gaps = (row.original.resume_gaps || []).slice(0, 3)
+                if (gaps.length === 0) return <span className="text-zinc-400 text-xs">—</span>
+                return (
+                  <div className="flex flex-wrap gap-1">
+                    {gaps.map((g, i) => (
+                      <span key={i} className="chip text-[10px] bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300" title={g}>
+                        {g.length > 22 ? g.slice(0, 20) + '…' : g}
+                      </span>
+                    ))}
+                  </div>
+                )
+              },
+            },
+          ] as ColumnDef<GroupedJob>[])
+        : []),
       {
         accessorKey: 'status',
         header: 'Stage',
@@ -220,7 +266,7 @@ export function JobTable({
         ),
       },
     ],
-    [update]
+    [update, enableSelection, allVisibleSelected, selectedIds, onToggleOne, onToggleAll, matchingEnabled]
   )
 
   const table = useReactTable({

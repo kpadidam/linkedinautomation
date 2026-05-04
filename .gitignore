@@ -56,6 +56,10 @@ ef jsc.txt
 # Runtime browser state
 data/browser_profile/
 
+# Data files
+*.csv
+*.xlsx
+
 # Node / Vite
 node_modules/
 dashboard-ui/node_modules/
@@ -68,6 +72,10 @@ test-results/
 login_failure.png
 login_error.png
 
+# Debug screenshots
+debug_*.png
+*.png
+
 # Temporary files
 *.tmp
 *.bak
@@ -76,4 +84,6 @@ login_error.png
 # Search logs
 linkedin_scrape_log.json
 search_*.json
+
+# Claude Code worktrees
 .claude/

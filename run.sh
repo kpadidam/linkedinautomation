@@ -38,8 +38,8 @@ if [ ! -f "linkedin_jobs.db" ]; then
     python database/models.py
 fi
 
-# Create necessary directories if needed
-mkdir -p logs
+# Create necessary directories
+mkdir -p data logs static
 
 # Start the application
 echo "Starting FastAPI server..."

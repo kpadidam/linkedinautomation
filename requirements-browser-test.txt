@@ -1,0 +1,19 @@
+# Browser Automation Shootout Requirements
+
+# For browser-use
+browser-use>=0.1.0
+langchain-openai>=0.1.0
+langchain-anthropic>=0.1.0
+
+# For Playwright (used by all three)
+playwright>=1.40.0
+
+# For environment and utilities
+python-dotenv>=1.0.0
+asyncio-extra
+
+# Optional: If you want to use Anthropic instead of OpenAI
+anthropic>=0.20.0
+
+# Optional: For better async support
+aiofiles>=23.0.0

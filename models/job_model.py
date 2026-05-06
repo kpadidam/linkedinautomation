@@ -176,15 +176,15 @@ class JobAnalysis(BaseModel):
 
 class GoogleSheetRow(BaseModel):
     """Model for Google Sheets row data."""
-
-    job_id: str = Field(..., description="LinkedIn job ID")
+    
+    job_id: str = Field(..., description="Unique job identifier")
     date: str = Field(..., description="Date scraped (YYYY-MM-DD)")
     time: str = Field(..., description="Time scraped (HH:MM:SS)")
     role: str = Field(..., description="Job title/role")
     company: str = Field(..., description="Company name")
     location: str = Field(..., description="Job location")
     job_type: str = Field(default="", description="Type of job")
-    level: str = Field(default="", description="Experience level as text")
+    level: int = Field(default=0, description="Years of experience as number")
     link: str = Field(..., description="Link to job posting")
     job_responsibilities: str = Field(..., description="Job responsibilities")
     preferred_skills: str = Field(default="", description="Preferred/required skills")
@@ -198,14 +198,14 @@ class GoogleSheetRow(BaseModel):
     def from_job_listing(cls, job: JobListing) -> "GoogleSheetRow":
         """Create Google Sheet row from job listing."""
         scraped_dt = job.scraped_at
-
+        
         # Format responsibilities for spreadsheet
         if job.responsibilities and isinstance(job.responsibilities, list) and len(job.responsibilities) > 0:
             # Join responsibilities with bullet points
             job_responsibilities = "\n• ".join(job.responsibilities[:5])  # Limit to 5
         else:
             job_responsibilities = job.description[:500] + "..." if len(job.description) > 500 else job.description
-
+        
         # Handle job_type properly
         job_type_str = ""
         if job.job_type:
@@ -213,43 +213,25 @@ class GoogleSheetRow(BaseModel):
                 job_type_str = job.job_type.value
             else:
                 job_type_str = str(job.job_type)
-
-        # Format experience level as text
-        level_text = ""
-        if job.experience_level:
-            if hasattr(job.experience_level, 'value'):
-                level_text = job.experience_level.value.replace('-', ' ').title()  # "mid-senior" -> "Mid Senior"
-            else:
-                level_text = str(job.experience_level).replace('-', ' ').title()
-        elif job.level is not None and job.level > 0:
-            # Convert numeric years to text description
-            if job.level <= 2:
-                level_text = "Entry Level"
-            elif job.level <= 5:
-                level_text = "Associate"
-            elif job.level <= 8:
-                level_text = "Mid-Senior Level"
-            else:
-                level_text = "Director+"
-
+        
         # Extract preferred skills from requirements or use skills
         preferred_skills = ""
-        if job.skills and isinstance(job.skills, list) and job.skills != ["Not specified"]:
-            preferred_skills = ", ".join(job.skills[:10])
-        elif job.requirements and isinstance(job.requirements, list):
+        if job.requirements and isinstance(job.requirements, list):
             # Filter for skill-related requirements
             skill_reqs = [req for req in job.requirements if any(word in req.lower() for word in ['skill', 'experience', 'knowledge', 'proficient'])]
             if skill_reqs:
                 preferred_skills = ", ".join(skill_reqs[:3])
-
+        if not preferred_skills and job.skills:
+            preferred_skills = ", ".join(job.skills) if isinstance(job.skills, list) else str(job.skills)
+        
         # Matching skills - skills that match the resume
         matching_skills = ""
         if job.match_reasons and isinstance(job.match_reasons, list):
             matching_skills = ", ".join(job.match_reasons[:5])
-        elif job.skills and isinstance(job.skills, list) and job.skills != ["Not specified"]:
-            # Use extracted skills as matching skills
+        elif job.skills and isinstance(job.skills, list):
+            # For now, use extracted skills as matching skills
             matching_skills = ", ".join(job.skills[:5])
-
+        
         return cls(
             job_id=job.job_id,
             date=scraped_dt.strftime("%Y-%m-%d"),
@@ -258,7 +240,7 @@ class GoogleSheetRow(BaseModel):
             company=job.company,
             location=job.location,
             job_type=job_type_str,
-            level=level_text,
+            level=job.level if job.level is not None else 0,
             link=str(job.url) if job.url else "",
             job_responsibilities=job_responsibilities,
             preferred_skills=preferred_skills,
@@ -289,7 +271,7 @@ class GoogleSheetRow(BaseModel):
             self.posted,
             self.number_of_applicants
         ]
-
+    
     @classmethod
     def get_headers(cls) -> List[str]:
         """Get headers for Google Sheets."""
@@ -303,7 +285,7 @@ class GoogleSheetRow(BaseModel):
             "Job Type",
             "Level",
             "Link",
-            "Job Responsibilities",
+            "Job Responsibilities:",
             "Preferred Skills",
             "Matching Skills",
             "Role Match %",

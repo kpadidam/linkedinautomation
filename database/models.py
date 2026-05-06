@@ -190,17 +190,45 @@ class UserProfile(Base):
     skills = Column(JSON, nullable=True)  # Store as JSON array
     preferred_locations = Column(JSON, nullable=True)  # Store as JSON array
     preferred_job_types = Column(JSON, nullable=True)  # Store as JSON array
+    search_roles = Column(JSON, nullable=True)  # Roles to scrape (overrides job_search_config.json)
     minimum_salary = Column(String(50), nullable=True)
     
-    # Search preferences
+    # Search preferences. ``search_frequency_minutes`` is the canonical knob;
+    # it lets us pick sub-hour cadences (down to single-minute for testing).
+    # The legacy ``search_frequency_hours`` column stays as a fallback so old
+    # rows / .env-bootstrapped values keep working until we explicitly retire
+    # them. Backend resolution: minutes wins when non-null/positive, else
+    # hours * 60.
     auto_search_enabled = Column(Boolean, default=False)
     search_frequency_hours = Column(Integer, default=24)
+    search_frequency_minutes = Column(Integer, nullable=True)
     last_auto_search = Column(DateTime, nullable=True)
     
     # Notification preferences
     email_notifications = Column(Boolean, default=False)
     min_match_score_alert = Column(Float, default=80.0)
-    
+
+    # Feature flags / scraper toggles (persisted; UI-editable)
+    enable_resume_matching = Column(Boolean, default=True)
+    headless_browser = Column(Boolean, default=True)
+    browser_timeout = Column(Integer, default=30000)
+
+    # Secrets (DB-first, .env fallback). Stored plaintext on the local SQLite
+    # file — single-user threat model. UI accepts edits via /api/settings;
+    # quick_search.py copies these into os.environ at scrape time.
+    openai_api_key = Column(Text, nullable=True)
+    groq_api_key = Column(Text, nullable=True)
+    linkedin_email = Column(String(200), nullable=True)
+    linkedin_password = Column(Text, nullable=True)
+
+    # Resumable scraper progress (Option A: checkpoint per category).
+    # last_completed_category_index is -1 when no run is in flight; otherwise
+    # the index of the last fully-finished category in the most recent
+    # search_roles list. pending_search_started_at marks when this in-flight
+    # run began so the UI/scraper can ignore stale checkpoints.
+    last_completed_category_index = Column(Integer, default=-1)
+    pending_search_started_at = Column(DateTime, nullable=True)
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -232,6 +260,54 @@ class AnalysisCache(Base):
     
     def __repr__(self):
         return f"<AnalysisCache(job_id='{self.job_id}', type='{self.analysis_type}')>"
+
+
+class Followup(Base):
+    """Reminder linked to a job."""
+    __tablename__ = "followups"
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(String(100), nullable=False, index=True)
+    due_at = Column(DateTime, nullable=False)
+    note = Column(Text, nullable=True)
+    done = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "job_id": self.job_id,
+            "due_at": self.due_at.isoformat() if self.due_at else None,
+            "note": self.note,
+            "done": bool(self.done),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class InterviewEvent(Base):
+    """Interview scheduled for a job."""
+    __tablename__ = "interview_events"
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(String(100), nullable=False, index=True)
+    stage = Column(String(50), nullable=False)  # phone, tech, onsite, offer, …
+    scheduled_at = Column(DateTime, nullable=False)  # stored as UTC
+    location = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
+    interviewer_tz = Column(String(64), nullable=True)  # IANA tz, e.g. "America/New_York"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "job_id": self.job_id,
+            "stage": self.stage,
+            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
+            "location": self.location,
+            "notes": self.notes,
+            "interviewer_tz": self.interviewer_tz,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
 
 # Create engine and session

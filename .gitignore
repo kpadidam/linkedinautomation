@@ -87,3 +87,8 @@ search_*.json
 
 # Claude Code worktrees
 .claude/
+
+# Local tool state / scratch
+.paircode/
+palette-preview.html
+video/

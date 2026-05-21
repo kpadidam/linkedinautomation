@@ -46,6 +46,10 @@ export function useStartSession() {
   return useMutation({
     mutationFn: async () => {
       const r = await fetch('/api/sessions/start', { method: 'POST' })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        throw new Error(err.detail || `${r.status} ${r.statusText}`)
+      }
       return r.json()
     },
     onSuccess: () => {
@@ -60,6 +64,10 @@ export function useStopSession() {
   return useMutation({
     mutationFn: async () => {
       const r = await fetch('/api/sessions/stop', { method: 'POST' })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        throw new Error(err.detail || `${r.status} ${r.statusText}`)
+      }
       return r.json()
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),
@@ -86,6 +94,10 @@ export function usePauseSession() {
   return useMutation({
     mutationFn: async () => {
       const r = await fetch('/api/sessions/pause', { method: 'POST' })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        throw new Error(err.detail || `${r.status} ${r.statusText}`)
+      }
       return r.json()
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),
@@ -97,6 +109,10 @@ export function useResumePausedSession() {
   return useMutation({
     mutationFn: async () => {
       const r = await fetch('/api/sessions/resume', { method: 'POST' })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        throw new Error(err.detail || `${r.status} ${r.statusText}`)
+      }
       return r.json()
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['session-status'] }),

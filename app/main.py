@@ -40,7 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from config import settings, STATIC_DIR, LOGGING_CONFIG
 from database.models import get_db, Job, SearchRun, init_db, engine
@@ -91,7 +91,7 @@ class JobSearchRequest(BaseModel):
     experience_level: Optional[str] = None
     remote: Optional[bool] = None
     posted_within: Optional[str] = "24h"
-    max_results: int = 20
+    max_results: int = Field(20, ge=1, le=100)
     enable_matching: bool = True
     save_to_sheets: bool = True
 
@@ -135,7 +135,7 @@ class SettingsUpdateRequest(BaseModel):
     browser_timeout: Optional[int] = None
     auto_search_enabled: Optional[bool] = None
     search_frequency_hours: Optional[int] = None
-    search_frequency_minutes: Optional[int] = None
+    search_frequency_minutes: Optional[int] = Field(None, ge=30, le=1440)
     min_match_score_alert: Optional[float] = None
     email_notifications: Optional[bool] = None
     # Secrets: empty string => clear (use .env fallback). null => no change.
@@ -225,9 +225,10 @@ async def _auto_search_loop():
                 logger.info(
                     f"Auto-trigger firing (last={last}, frequency={freq_min}m)"
                 )
-                profile.last_auto_search = datetime.utcnow()
-                db.commit()
-                await session_manager.start()
+                result = await session_manager.start()
+                if result.get("status") == "started":
+                    profile.last_auto_search = datetime.utcnow()
+                    db.commit()
             finally:
                 db.close()
         except asyncio.CancelledError:
@@ -288,7 +289,7 @@ async def health_check():
         "status": "healthy",
         "app_name": settings.app_name,
         "version": settings.app_version,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -856,7 +857,14 @@ async def session_start(db: Session = Depends(get_db)):
                 "message": "Setup incomplete: " + ", ".join(setup["missing_required"]),
             },
         )
-    return await session_manager.start()
+    result = await session_manager.start()
+    if result.get("status") == "started":
+        # Bump the auto-search baseline so the scheduler doesn't immediately
+        # re-fire on the next tick after a manual run that overshot the window.
+        profile = db_manager.get_or_create_user_profile(db)
+        profile.last_auto_search = datetime.utcnow()
+        db.commit()
+    return result
 
 
 @app.post("/api/sessions/stop")

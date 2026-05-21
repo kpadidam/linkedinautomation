@@ -13,7 +13,8 @@ export function FollowupList({ jobId }: { jobId: string }) {
   const [adding, setAdding] = useState(false)
   const [due, setDue] = useState<string>(() => {
     const d = new Date(); d.setDate(d.getDate() + 3); d.setMinutes(0); d.setSeconds(0)
-    return d.toISOString().slice(0, 16)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
   })
   const [note, setNote] = useState('')
 

@@ -1,6 +1,6 @@
 """SQLAlchemy database models for job tracking."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, Boolean, JSON, Index
 from sqlalchemy.ext.declarative import declarative_base
@@ -9,6 +9,18 @@ from sqlalchemy.orm import sessionmaker
 from config import settings
 
 Base = declarative_base()
+
+
+def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """Serialize a naive UTC datetime as an ISO string the browser parses
+    as UTC. Naive isoformat() output has no offset, so JS ``new Date()``
+    silently treats it as local time. Stamp tzinfo=UTC before formatting.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 
 class Job(Base):
@@ -102,8 +114,8 @@ class Job(Base):
             'posted_date': self.posted_date,
             'application_deadline': self.application_deadline,
             'applicants_count': self.applicants_count,
-            'scraped_at': self.scraped_at.isoformat() if self.scraped_at else None,
-            'last_updated': self.last_updated.isoformat() if self.last_updated else None,
+            'scraped_at': _utc_iso(self.scraped_at),
+            'last_updated': _utc_iso(self.last_updated),
             'source': self.source,
             'status': self.status,
             'keywords': self.keywords,
@@ -114,7 +126,7 @@ class Job(Base):
             'tags': self.tags,
             'viewed': self.viewed,
             'applied': self.applied,
-            'applied_date': self.applied_date.isoformat() if self.applied_date else None
+            'applied_date': _utc_iso(self.applied_date)
         }
 
 
@@ -165,8 +177,8 @@ class SearchRun(Base):
             'total_results': self.total_results,
             'jobs_scraped': self.jobs_scraped,
             'jobs_matched': self.jobs_matched,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'started_at': _utc_iso(self.started_at),
+            'completed_at': _utc_iso(self.completed_at),
             'duration_seconds': self.duration_seconds,
             'status': self.status,
             'error_message': self.error_message
@@ -277,10 +289,10 @@ class Followup(Base):
         return {
             "id": self.id,
             "job_id": self.job_id,
-            "due_at": self.due_at.isoformat() if self.due_at else None,
+            "due_at": _utc_iso(self.due_at),
             "note": self.note,
             "done": bool(self.done),
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": _utc_iso(self.created_at),
         }
 
 
@@ -302,11 +314,11 @@ class InterviewEvent(Base):
             "id": self.id,
             "job_id": self.job_id,
             "stage": self.stage,
-            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
+            "scheduled_at": _utc_iso(self.scheduled_at),
             "location": self.location,
             "notes": self.notes,
             "interviewer_tz": self.interviewer_tz,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": _utc_iso(self.created_at),
         }
 
 

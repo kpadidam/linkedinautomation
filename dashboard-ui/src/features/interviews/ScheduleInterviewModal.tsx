@@ -9,7 +9,35 @@ import {
 import type { Job } from '@/lib/types'
 import type { Interview } from '@/lib/types.interviews'
 import { useUndoStore } from '@/lib/undo'
+import { getLocalTz } from '@/lib/tz'
 import { cn, companyColor } from '@/lib/utils'
+
+// Interpret a "YYYY-MM-DDTHH:mm" wall-time string as if it were observed in
+// the given IANA timezone, and return the equivalent UTC Date. Uses the
+// standard offset-correction trick: format the naive UTC guess in the target
+// tz, diff against the wall components, and shift.
+function wallTimeInTzToUtc(wall: string, tz: string): Date {
+  const [datePart, timePart] = wall.split('T')
+  if (!datePart || !timePart) return new Date(wall)
+  const [y, m, d] = datePart.split('-').map(Number)
+  const [hh, mm] = timePart.split(':').map(Number)
+  const utcGuess = Date.UTC(y, m - 1, d, hh, mm)
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+  const parts = dtf.formatToParts(new Date(utcGuess))
+  const map: Record<string, string> = {}
+  for (const p of parts) if (p.type !== 'literal') map[p.type] = p.value
+  const tzAsUtc = Date.UTC(
+    Number(map.year), Number(map.month) - 1, Number(map.day),
+    Number(map.hour) % 24, Number(map.minute), Number(map.second),
+  )
+  const offset = tzAsUtc - utcGuess
+  return new Date(utcGuess - offset)
+}
 
 // Stage → typical duration (mins). Mirrors TimeGridView so behaviour is consistent.
 const DURATION_BY_STAGE: Record<string, number> = {
@@ -177,8 +205,12 @@ export function ScheduleInterviewModal(props: ScheduleInterviewModalProps) {
 
   const submit = () => {
     if (!valid || !effectiveJobId) return
-    const iso = new Date(when).toISOString()
     const tz = interviewerTz || null
+    const localTz = getLocalTz()
+    const iso =
+      tz && tz !== localTz
+        ? wallTimeInTzToUtc(when, tz).toISOString()
+        : new Date(when).toISOString()
     if (editing) {
       update.mutate(
         {

@@ -42,6 +42,9 @@ class SessionManager:
         self.log_buffer: deque[str] = deque(maxlen=2000)
         self.subscribers: list[asyncio.Queue[str]] = []
         self._reader_task: Optional[asyncio.Task] = None
+        # Serialize start() so two concurrent callers can't both pass the
+        # is_running guard and spawn duplicate scraper subprocesses.
+        self._start_lock = asyncio.Lock()
         # Pause state: process-level freeze via SIGSTOP/SIGCONT
         self.paused: bool = False
         self.paused_at: Optional[datetime] = None
@@ -68,48 +71,51 @@ class SessionManager:
         }
 
     async def start(self, script: str = "quick_search.py") -> dict:
-        if self.is_running:
-            return {"status": "already_running", **self.status()}
+        # Hold the lock across the is_running check AND the spawn so two
+        # concurrent callers can't both pass the guard and double-spawn.
+        async with self._start_lock:
+            if self.is_running:
+                return {"status": "already_running", **self.status()}
 
-        # Clean any stale Chromium singleton locks from a previous unclean shutdown.
-        # These prevent persistent_context from launching with the same profile.
-        profile_dir = os.path.join(self.project_root, "data", "browser_profile")
-        for fname in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
-            try:
-                p = os.path.join(profile_dir, fname)
-                if os.path.lexists(p):
-                    os.unlink(p)
-            except Exception as e:
-                logger.warning(f"Could not remove {fname}: {e}")
+            # Clean any stale Chromium singleton locks from a previous unclean shutdown.
+            # These prevent persistent_context from launching with the same profile.
+            profile_dir = os.path.join(self.project_root, "data", "browser_profile")
+            for fname in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                try:
+                    p = os.path.join(profile_dir, fname)
+                    if os.path.lexists(p):
+                        os.unlink(p)
+                except Exception as e:
+                    logger.warning(f"Could not remove {fname}: {e}")
 
-        venv_python = os.path.join(self.project_root, "venv", "bin", "python")
-        python = venv_python if os.path.exists(venv_python) else sys.executable
+            venv_python = os.path.join(self.project_root, "venv", "bin", "python")
+            python = venv_python if os.path.exists(venv_python) else sys.executable
 
-        self.process = await asyncio.create_subprocess_exec(
-            python, "-u", script,
-            cwd=self.project_root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
-        self.started_at = datetime.utcnow()
-        self.exit_code = None
-        # Reset pause accounting for the new run.
-        self.paused = False
-        self.paused_at = None
-        self.pause_duration_seconds = 0.0
-        self.log_buffer.clear()
-        self._reader_task = asyncio.create_task(self._read_output())
-        # Visual divider so the live log clearly shows where each run begins.
-        bar = "═" * 60
-        self._broadcast("")
-        self._broadcast(bar)
-        self._broadcast(
-            f"  SESSION STARTED  ·  pid {self.process.pid}  ·  "
-            f"{self.started_at.strftime('%H:%M:%S')} UTC  ·  script={script}"
-        )
-        self._broadcast(bar)
-        return {"status": "started", **self.status()}
+            self.process = await asyncio.create_subprocess_exec(
+                python, "-u", script,
+                cwd=self.project_root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+            self.started_at = datetime.utcnow()
+            self.exit_code = None
+            # Reset pause accounting for the new run.
+            self.paused = False
+            self.paused_at = None
+            self.pause_duration_seconds = 0.0
+            self.log_buffer.clear()
+            self._reader_task = asyncio.create_task(self._read_output())
+            # Visual divider so the live log clearly shows where each run begins.
+            bar = "═" * 60
+            self._broadcast("")
+            self._broadcast(bar)
+            self._broadcast(
+                f"  SESSION STARTED  ·  pid {self.process.pid}  ·  "
+                f"{self.started_at.strftime('%H:%M:%S')} UTC  ·  script={script}"
+            )
+            self._broadcast(bar)
+            return {"status": "started", **self.status()}
 
     async def pause(self) -> dict:
         """Freeze the running process via SIGSTOP. Idempotent on already-paused."""

@@ -15,13 +15,14 @@ import {
 } from 'react-icons/fi'
 import { useJobs, useStatistics, useSearches } from '@/hooks/useJobs'
 import { useFollowups } from '@/hooks/useInterviews'
+import { useSessionStatus } from '@/hooks/useSession'
 import { useSettings } from '@/hooks/useSettings'
 import { useSetupStatus } from '@/hooks/useSetup'
 import { StatCard } from '@/components/StatCard'
 import { SetupBanner } from '@/components/SetupBanner'
 import { JobDetailDrawer } from '@/features/jobs/JobDetailDrawer'
 import { PIPELINE_STAGES } from '@/lib/types'
-import { cn, formatRelative, nextActionFor, scoreColor, statusColor, statusLabel } from '@/lib/utils'
+import { cn, effectiveMatchScore, formatRelative, nextActionFor, scoreColor, statusColor, statusLabel } from '@/lib/utils'
 
 const NEW_THRESHOLD_HOURS = 24
 const HIGH_MATCH = 80
@@ -34,6 +35,8 @@ export default function DashboardScreen() {
   const { data: followups = [] } = useFollowups()
   const { data: settings } = useSettings()
   const { data: setup } = useSetupStatus()
+  const { data: sessionStatus } = useSessionStatus()
+  const sessionRunning = !!sessionStatus?.running
   const matchingEnabled = settings?.enable_resume_matching ?? true
   const [openId, setOpenId] = useState<string | null>(null)
 
@@ -74,7 +77,7 @@ export default function DashboardScreen() {
     () =>
       jobs
         .filter((j) => ((j.status as string) || 'new') === 'new')
-        .sort((a, b) => (b.resume_match_score ?? 0) - (a.resume_match_score ?? 0))
+        .sort((a, b) => (effectiveMatchScore(b) ?? 0) - (effectiveMatchScore(a) ?? 0))
         .slice(0, 5),
     [jobs]
   )
@@ -156,7 +159,7 @@ export default function DashboardScreen() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to="/session" className="btn-primary">
-            <FiPlay className="h-4 w-4" /> Start Session
+            <FiPlay className="h-4 w-4" /> {sessionRunning ? 'View Live Session' : 'Start Session'}
           </Link>
           <Link to="/review-queue" className="btn-ghost">
             <FiInbox className="h-4 w-4" /> Review Queue
@@ -272,11 +275,14 @@ export default function DashboardScreen() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {matchingEnabled && j.resume_match_score != null ? (
-                        <span className={cn('chip text-xs', scoreColor(j.resume_match_score))}>
-                          {Math.round(j.resume_match_score)}%
-                        </span>
-                      ) : null}
+                      {(() => {
+                        const s = effectiveMatchScore(j)
+                        return matchingEnabled && s != null ? (
+                          <span className={cn('chip text-xs', scoreColor(s))}>
+                            {s}%
+                          </span>
+                        ) : null
+                      })()}
                       <span className="hidden md:inline text-[11px] text-zinc-500 dark:text-zinc-400">
                         {nextActionFor(j.status)}
                       </span>

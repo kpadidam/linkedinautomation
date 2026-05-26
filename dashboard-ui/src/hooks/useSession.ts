@@ -119,9 +119,22 @@ export function useResumePausedSession() {
   })
 }
 
-export function useLogStream(active: boolean) {
+/**
+ * SSE log stream consumer for the active scraper session.
+ *
+ * `resetKey` exists so callers can wipe the buffer when a new session
+ * starts — pass `status?.started_at`. Without it, a fresh run shows the
+ * previous run's tail until new lines push them out of the 1500-line
+ * window. The reconnect happens on every `resetKey` change so the backend's
+ * own in-memory deque doesn't replay stale lines either.
+ */
+export function useLogStream(active: boolean, resetKey?: string | null) {
   const [lines, setLines] = useState<string[]>([])
   const esRef = useRef<EventSource | null>(null)
+
+  useEffect(() => {
+    setLines([])
+  }, [resetKey])
 
   useEffect(() => {
     if (!active) return
@@ -135,7 +148,7 @@ export function useLogStream(active: boolean) {
     }
     es.onerror = () => { /* keep buffer; browser will retry */ }
     return () => { es.close(); esRef.current = null }
-  }, [active])
+  }, [active, resetKey])
 
   const clear = () => setLines([])
   return { lines, clear }

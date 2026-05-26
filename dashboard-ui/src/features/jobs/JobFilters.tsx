@@ -1,4 +1,5 @@
 import { FiSearch, FiFilter, FiX } from 'react-icons/fi'
+import { PIPELINE_STAGES } from '@/lib/types'
 
 export interface JobFiltersValue {
   q: string
@@ -34,11 +35,11 @@ export function JobFilters({
       >
         <option value="">All status</option>
         <option value="new">New</option>
-        <option value="saved">Saved</option>
-        <option value="applied">Applied</option>
-        <option value="interviewing">Interviewing</option>
-        <option value="offer">Offer</option>
-        <option value="rejected">Rejected</option>
+        {PIPELINE_STAGES.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.label}
+          </option>
+        ))}
       </select>
       <div className="flex items-center gap-2 surface rounded-md px-3 py-1.5">
         <FiFilter className="h-4 w-4 text-zinc-400" />

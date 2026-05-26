@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, Boolean, JSON, Index
+from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, Boolean, JSON, Index, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -80,7 +80,17 @@ class Job(Base):
     viewed = Column(Boolean, default=False)
     applied = Column(Boolean, default=False)
     applied_date = Column(DateTime, nullable=True)
-    
+
+    # Auto-apply pipeline (slice 1 — observation only; populated by the
+    # embedding matcher in services/embed_matcher.py). The legacy
+    # ``resume_match_score``/``match_reasons`` columns above stay for the
+    # OpenAI/Groq-based matcher; these new ones are the local-semantic
+    # scorer's outputs and gating signal.
+    apply_status = Column(String(50), default="not_eligible", index=True)
+    match_score = Column(Float, nullable=True, index=True)
+    match_score_percentile = Column(Float, nullable=True)
+    match_computed_at = Column(DateTime, nullable=True)
+
     # Create indexes for common queries
     __table_args__ = (
         Index('idx_company_title', 'company', 'title'),
@@ -126,7 +136,11 @@ class Job(Base):
             'tags': self.tags,
             'viewed': self.viewed,
             'applied': self.applied,
-            'applied_date': _utc_iso(self.applied_date)
+            'applied_date': _utc_iso(self.applied_date),
+            'apply_status': self.apply_status,
+            'match_score': self.match_score,
+            'match_score_percentile': self.match_score_percentile,
+            'match_computed_at': _utc_iso(self.match_computed_at),
         }
 
 
@@ -219,6 +233,13 @@ class UserProfile(Base):
     # Notification preferences
     email_notifications = Column(Boolean, default=False)
     min_match_score_alert = Column(Float, default=80.0)
+
+    # Auto-apply matcher (slice 1). Toggle gates the upcoming _match_loop
+    # in app/main.py; threshold is the percentile cut-off (0-99) above which
+    # a job becomes a candidate. Defaults err safe: matching enabled but the
+    # bar is high (top decile of recent scores).
+    auto_match_enabled = Column(Boolean, default=True)
+    match_percentile_threshold = Column(Integer, default=90)
 
     # Feature flags / scraper toggles (persisted; UI-editable)
     enable_resume_matching = Column(Boolean, default=True)
@@ -320,6 +341,36 @@ class InterviewEvent(Base):
             "interviewer_tz": self.interviewer_tz,
             "created_at": _utc_iso(self.created_at),
         }
+
+
+class JobEmbedding(Base):
+    """Cached embeddings + parsed signals for a job.
+
+    Composite PK on (job_id, embedding_model) so we can swap models later
+    without losing old rows. Vectors are stored as raw bytes produced by
+    ``numpy.save`` into a ``BytesIO`` buffer, which preserves dtype and
+    shape — load with ``numpy.load`` on read. ``requirements_vecs`` packs
+    a 2-D array (one row per extracted requirement); empty arrays are
+    legal for postings with no parseable requirements section.
+    """
+
+    __tablename__ = "job_embeddings"
+
+    job_id = Column(String(100), primary_key=True, index=True)
+    embedding_model = Column(String(100), primary_key=True)
+    title_vec = Column(LargeBinary, nullable=False)
+    requirements_vecs = Column(LargeBinary, nullable=False)
+    extracted_requirements = Column(JSON, nullable=True)  # list[str]
+    must_have_skills = Column(JSON, nullable=True)        # list[str]
+    years_required = Column(Integer, nullable=True)
+    title_family = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return (
+            f"<JobEmbedding(job_id='{self.job_id}', "
+            f"model='{self.embedding_model}')>"
+        )
 
 
 # Create engine and session

@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { LIVE_POLL_MS } from '@/lib/poll'
 import type { JobUpdate, JobsQuery } from '@/lib/types'
 
 export function useJobs(q: JobsQuery = {}) {
   return useQuery({
     queryKey: ['jobs', q],
     queryFn: () => api.jobs(q),
-    refetchInterval: 5000,
+    refetchInterval: LIVE_POLL_MS,
   })
 }
 
@@ -34,7 +35,7 @@ export function useStatistics() {
   return useQuery({
     queryKey: ['statistics'],
     queryFn: () => api.statistics(),
-    refetchInterval: 10000,
+    refetchInterval: LIVE_POLL_MS,
   })
 }
 
@@ -42,6 +43,6 @@ export function useSearches(limit = 10) {
   return useQuery({
     queryKey: ['searches', limit],
     queryFn: () => api.searches(limit),
-    refetchInterval: 10000,
+    refetchInterval: LIVE_POLL_MS,
   })
 }

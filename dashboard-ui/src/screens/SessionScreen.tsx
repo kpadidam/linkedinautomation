@@ -6,7 +6,9 @@ import { useLogStream, useSessionStatus } from '@/hooks/useSession'
 export default function SessionScreen() {
   const { data: status } = useSessionStatus()
   const [autoscroll, setAutoscroll] = useState(true)
-  const { lines, clear } = useLogStream(true)
+  // Tie the log buffer's identity to the active session so a new scrape
+  // starts with an empty pane instead of inheriting the last run's tail.
+  const { lines, clear } = useLogStream(true, status?.started_at ?? null)
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -14,6 +16,19 @@ export default function SessionScreen() {
   }, [lines.length, autoscroll])
 
   const running = !!status?.running
+  const paused = !!status?.paused
+  // Backend emits explicit-UTC ISO strings (_utc_iso); render in the
+  // operator's local tz. Previously sliced (11, 19) which displayed UTC
+  // hours as if they were local — Header.tsx got it right, this screen
+  // didn't. Same data, two answers — the visible inconsistency.
+  const startedAtLocal = status?.started_at
+    ? new Date(status.started_at).toLocaleTimeString(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      })
+    : null
 
   return (
     <div className="p-4 md:p-6 space-y-4 h-full flex flex-col">
@@ -23,7 +38,7 @@ export default function SessionScreen() {
         </h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
           {running
-            ? `Running · pid ${status?.pid} · started ${status?.started_at?.slice(11, 19)}`
+            ? `${paused ? 'Paused' : 'Running'} · pid ${status?.pid} · started ${startedAtLocal ?? '—'}`
             : status?.exit_code != null
               ? `Idle · last exit ${status.exit_code}`
               : 'Idle'}
@@ -34,7 +49,16 @@ export default function SessionScreen() {
       <div className="surface rounded-lg flex-1 flex flex-col overflow-hidden">
         <div className="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs">
           <div className="flex items-center gap-2">
-            <span className={cn('h-2 w-2 rounded-full', running ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400')} />
+            <span
+              className={cn(
+                'h-2 w-2 rounded-full',
+                paused
+                  ? 'bg-orange-500 animate-pulse'
+                  : running
+                    ? 'bg-emerald-500 animate-pulse'
+                    : 'bg-zinc-400',
+              )}
+            />
             <span className="text-zinc-500 dark:text-zinc-400">{lines.length} lines</span>
           </div>
           <div className="flex items-center gap-1">

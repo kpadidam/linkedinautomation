@@ -5,7 +5,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { JobLabels } from './JobLabels'
 import { FollowupList } from '@/features/bookmarks/FollowupList'
 import { InterviewList } from '@/features/interviews/InterviewList'
-import { cn, formatRelative, nextActionFor, scoreColor, statusColor, statusLabel } from '@/lib/utils'
+import { cn, effectiveMatchScore, formatRelative, nextActionFor, scoreColor, statusColor, statusLabel } from '@/lib/utils'
 import { PIPELINE_STAGES } from '@/lib/types'
 import { useUndoStore } from '@/lib/undo'
 
@@ -89,11 +89,14 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string | null; onCl
                     <h2 className="text-xl font-semibold leading-tight">{job.title}</h2>
                     <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{job.company}</div>
                   </div>
-                  {matchingEnabled && job.resume_match_score != null ? (
-                    <span className={cn('chip text-sm font-semibold', scoreColor(job.resume_match_score))}>
-                      {Math.round(job.resume_match_score)}% match
-                    </span>
-                  ) : null}
+                  {(() => {
+                    const s = effectiveMatchScore(job)
+                    return matchingEnabled && s != null ? (
+                      <span className={cn('chip text-sm font-semibold', scoreColor(s))}>
+                        {s}% match
+                      </span>
+                    ) : null
+                  })()}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-3 text-xs text-zinc-500 dark:text-zinc-400">
                   {job.location ? <span className="flex items-center gap-1"><FiMapPin className="h-3 w-3" />{job.location}</span> : null}

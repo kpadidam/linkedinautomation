@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { LIVE_POLL_MS } from '@/lib/poll'
 
 export interface SetupItem {
   id: 'profile' | 'roles' | 'resume' | 'llm' | 'sheets' | string
@@ -22,6 +23,6 @@ export function useSetupStatus() {
       if (!r.ok) throw new Error(`${r.status}`)
       return (await r.json()) as SetupStatus
     },
-    refetchInterval: 5000,
+    refetchInterval: LIVE_POLL_MS,
   })
 }

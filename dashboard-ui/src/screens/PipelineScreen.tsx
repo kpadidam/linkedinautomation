@@ -6,7 +6,7 @@ import { useInterviews } from '@/hooks/useInterviews'
 import { useSettings } from '@/hooks/useSettings'
 import { PIPELINE_STAGES, type Job } from '@/lib/types'
 import type { Interview } from '@/lib/types.interviews'
-import { cn, daysSince, nextActionFor, scoreColor, statusColor } from '@/lib/utils'
+import { cn, daysSince, effectiveMatchScore, nextActionFor, scoreColor, statusColor } from '@/lib/utils'
 import { JobDetailDrawer } from '@/features/jobs/JobDetailDrawer'
 import { ScheduleInterviewModal } from '@/features/interviews/ScheduleInterviewModal'
 import { useUndoStore } from '@/lib/undo'
@@ -237,8 +237,9 @@ function JobCard({
   const matchingEnabled = settings?.enable_resume_matching ?? true
   const age = daysSince(job.last_updated || job.scraped_at)
   const isStale = age != null && age >= 7 && job.status !== 'rejected' && job.status !== 'offer'
+  const matchPct = effectiveMatchScore(job)
   const isHighMatchUnapplied =
-    matchingEnabled && job.status === 'saved' && (job.resume_match_score ?? 0) >= 85
+    matchingEnabled && job.status === 'saved' && (matchPct ?? 0) >= 85
   const nextRound = rounds.find((r) => new Date(r.scheduled_at).getTime() >= Date.now())
   const lastRound = rounds[rounds.length - 1]
   const upcomingRound = nextRound || lastRound
@@ -273,9 +274,9 @@ function JobCard({
         ) : null}
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
-        {matchingEnabled && job.resume_match_score != null ? (
-          <span className={cn('chip text-[10px]', scoreColor(job.resume_match_score))}>
-            {Math.round(job.resume_match_score)}%
+        {matchingEnabled && matchPct != null ? (
+          <span className={cn('chip text-[10px]', scoreColor(matchPct))}>
+            {matchPct}%
           </span>
         ) : <span />}
         {age != null ? (

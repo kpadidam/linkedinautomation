@@ -9,7 +9,7 @@ import {
 import { useMemo, useState } from 'react'
 import { FiBookmark, FiTag, FiExternalLink, FiCopy, FiArrowRight } from 'react-icons/fi'
 import type { Job } from '@/lib/types'
-import { cn, formatRelative, nextActionFor, scoreColor } from '@/lib/utils'
+import { cn, effectiveMatchScore, formatRelative, nextActionFor, scoreColor } from '@/lib/utils'
 import { useUpdateJob } from '@/hooks/useJobs'
 import { useSettings } from '@/hooks/useSettings'
 import { StatusSelect } from './StatusSelect'
@@ -142,13 +142,16 @@ export function JobTable({
       ...(matchingEnabled
         ? ([
             {
-              accessorKey: 'resume_match_score',
+              id: 'match_score',
               header: 'Match',
               size: 80,
+              // Prefer the slice-1 local semantic score; fall back to the
+              // legacy LLM score. ``effectiveMatchScore`` returns 0–100.
+              accessorFn: (row: GroupedJob) => effectiveMatchScore(row),
               cell: ({ getValue }) => {
-                const v = getValue<number | null | undefined>()
+                const v = getValue<number | null>()
                 if (v == null) return <span className="text-zinc-400 text-xs">—</span>
-                return <span className={cn('chip', scoreColor(v))}>{Math.round(v)}%</span>
+                return <span className={cn('chip', scoreColor(v))}>{v}%</span>
               },
             },
             {
@@ -156,7 +159,10 @@ export function JobTable({
               header: 'Why match',
               size: 220,
               cell: ({ row }: { row: { original: GroupedJob } }) => {
-                const reasons = (row.original.match_reasons || []).slice(0, 3)
+                // Defensive: legacy LLM matcher wrote list[str]; older
+                // serializations may have a dict — guard before .slice().
+                const raw = row.original.match_reasons
+                const reasons = Array.isArray(raw) ? raw.slice(0, 3) : []
                 if (reasons.length === 0) {
                   const skills = (row.original.skills || []).slice(0, 3)
                   if (skills.length === 0) return <span className="text-zinc-400 text-xs">—</span>

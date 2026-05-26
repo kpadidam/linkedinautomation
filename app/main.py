@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from config import settings, STATIC_DIR, LOGGING_CONFIG
-from database.models import get_db, Job, SearchRun, init_db, engine
+from database.models import get_db, Job, SearchRun, JobEmbedding, init_db, engine
 from sqlalchemy import text
 from database.db_manager import db_manager
 from scrapers.linkedin_scraper_robust import RobustLinkedInScraper
@@ -167,6 +167,13 @@ def _run_sqlite_migrations() -> None:
         ("user_profile", "linkedin_email", "VARCHAR(200)"),
         ("user_profile", "linkedin_password", "TEXT"),
         ("interview_events", "interviewer_tz", "VARCHAR(64)"),
+        # Auto-apply matcher (slice 1)
+        ("jobs", "apply_status", "VARCHAR(50) DEFAULT 'not_eligible'"),
+        ("jobs", "match_score", "FLOAT"),
+        ("jobs", "match_score_percentile", "FLOAT"),
+        ("jobs", "match_computed_at", "DATETIME"),
+        ("user_profile", "auto_match_enabled", "BOOLEAN DEFAULT 1"),
+        ("user_profile", "match_percentile_threshold", "INTEGER DEFAULT 90"),
     ]
     try:
         with engine.begin() as conn:
@@ -1014,6 +1021,202 @@ async def delete_interview(eid: int, db: Session = Depends(get_db)):
     if not e: raise HTTPException(404, "Interview not found")
     db.delete(e); db.commit()
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Auto-apply matcher endpoints (slice 1 — observation only, no submit)
+# ---------------------------------------------------------------------------
+
+
+def _build_candidate_profile(db: Session):
+    """Construct a CandidateProfile from DB UserProfile + loaded resume.
+
+    We prefer the live ``resume_matcher_service`` (already loaded at startup
+    with the user's PDF resume) for the resume text, falling back to the
+    UserProfile row. Skills come from the UserProfile row; if empty, fall
+    back to ``settings.skills_list`` (USER_SKILLS env var).
+    """
+
+    from services.embed_matcher import CandidateProfile
+
+    profile_row = db_manager.get_or_create_user_profile(db)
+
+    resume_text = ""
+    if resume_matcher_service and getattr(resume_matcher_service, "resume_profile", None):
+        resume_text = resume_matcher_service.resume_profile.resume_text or ""
+    if not resume_text:
+        resume_text = profile_row.resume_text or ""
+
+    bullets: List[str] = []
+    if resume_text:
+        if "\n" in resume_text and len(resume_text.splitlines()) >= 5:
+            bullets = [
+                ln.strip(" -*\u2022\t")
+                for ln in resume_text.splitlines()
+                if ln.strip()
+            ]
+        else:
+            import re as _re
+            bullets = [
+                s.strip()
+                for s in _re.split(r"(?<=[.!?])\s+", resume_text)
+                if s.strip()
+            ]
+        bullets = [b for b in bullets if len(b.split()) >= 3][:200]
+
+    skills = profile_row.skills or settings.skills_list or []
+    if isinstance(skills, str):
+        skills = [s.strip() for s in skills.split(",") if s.strip()]
+
+    return CandidateProfile(
+        resume_bullets=bullets,
+        skills=list(skills),
+        years_experience=None,
+        target_title_families=[],
+    )
+
+
+@app.post("/api/match/run")
+async def match_run(
+    limit: int = Query(200, ge=1, le=2000),
+    force: bool = Query(False, description="Re-score jobs that already have embeddings"),
+    db: Session = Depends(get_db),
+):
+    """Score any jobs that lack an embedding (or all jobs when ``force``).
+
+    Operator-triggered for slice 1; the scheduled loop lands in slice 3.
+    Writes ``Job.match_score``, ``match_score_percentile``,
+    ``match_computed_at``, and ``apply_status`` (``eligible`` vs
+    ``not_eligible``) based on the current user profile's percentile
+    threshold. Caches per-job embeddings + parsed signals in
+    ``job_embeddings`` so reruns are cheap.
+    """
+
+    from services.embed_matcher import (
+        DEFAULT_MODEL, encode, gate, score, to_bytes,
+    )
+    import numpy as np
+
+    profile_obj = _build_candidate_profile(db)
+    if not profile_obj.resume_bullets:
+        raise HTTPException(
+            400,
+            "No resume text available. Configure resume_file_path or upload a resume.",
+        )
+
+    user_profile_row = db_manager.get_or_create_user_profile(db)
+    percentile = int(user_profile_row.match_percentile_threshold or 90)
+
+    # Pick jobs to process. ``force`` re-scores everything.
+    q = db.query(Job)
+    if not force:
+        scored_ids = {
+            r.job_id
+            for r in db.query(JobEmbedding.job_id)
+            .filter(JobEmbedding.embedding_model == DEFAULT_MODEL)
+            .all()
+        }
+        q = q.filter(~Job.job_id.in_(scored_ids)) if scored_ids else q
+    jobs = q.limit(limit).all()
+
+    processed = 0
+    rejected = 0
+    scores: List[float] = [
+        s
+        for (s,) in db.query(Job.match_score)
+        .filter(Job.match_score.isnot(None))
+        .all()
+    ]
+
+    for job in jobs:
+        jd_text = job.description or ""
+        title = job.title or ""
+        try:
+            result = score(jd_text, title, profile_obj, model_name=DEFAULT_MODEL)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Match failed for {job.job_id}: {exc}")
+            continue
+
+        # Always upsert the embedding cache row so reruns skip this job.
+        # When the score was hard-rejected we still cache the parsed signals
+        # but the vectors will be empty placeholders (cheap, keeps logic
+        # uniform).
+        existing = (
+            db.query(JobEmbedding)
+            .filter(
+                JobEmbedding.job_id == job.job_id,
+                JobEmbedding.embedding_model == DEFAULT_MODEL,
+            )
+            .first()
+        )
+        if existing:
+            db.delete(existing)
+            db.flush()
+
+        if result.rejected_by is None and result.extracted_requirements:
+            req_vecs = encode(result.extracted_requirements, name=DEFAULT_MODEL)
+            title_vec = encode([title], name=DEFAULT_MODEL)
+        else:
+            req_vecs = np.zeros((0, 384), dtype=np.float32)
+            title_vec = np.zeros((0, 384), dtype=np.float32)
+
+        db.add(
+            JobEmbedding(
+                job_id=job.job_id,
+                embedding_model=DEFAULT_MODEL,
+                title_vec=to_bytes(title_vec),
+                requirements_vecs=to_bytes(req_vecs),
+                extracted_requirements=result.extracted_requirements,
+                must_have_skills=result.must_haves_found,
+                years_required=result.years_required,
+                title_family=result.title_family,
+            )
+        )
+
+        job.match_score = result.raw_score
+        job.match_computed_at = datetime.utcnow()
+        job.match_reasons = result.to_dict()
+        if result.rejected_by is not None:
+            job.apply_status = "not_eligible"
+            rejected += 1
+        else:
+            scores.append(result.raw_score)
+            passes = gate(result.raw_score, scores, percentile)
+            job.apply_status = "eligible" if passes else "not_eligible"
+            if scores:
+                rank = sum(1 for s in scores if s <= result.raw_score) / len(scores)
+                job.match_score_percentile = round(rank * 100, 2)
+        processed += 1
+
+    db.commit()
+    return {
+        "processed": processed,
+        "rejected_by_hard_filters": rejected,
+        "percentile_threshold": percentile,
+        "model": DEFAULT_MODEL,
+        "total_scored": len(scores),
+    }
+
+
+@app.get("/api/match/candidates")
+async def match_candidates(
+    limit: int = Query(50, ge=1, le=500),
+    include_rejected: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """Top-scored unapplied jobs that pass the percentile gate.
+
+    ``apply_status == "eligible"`` means the job cleared the user's
+    configured percentile threshold *at the time it was last scored*.
+    Re-run ``/api/match/run`` after changing the threshold to re-gate.
+    """
+
+    q = db.query(Job).filter(Job.applied.is_(False))
+    if not include_rejected:
+        q = q.filter(Job.apply_status == "eligible")
+    q = q.filter(Job.match_score.isnot(None))
+    rows = q.order_by(Job.match_score.desc()).limit(limit).all()
+    return [j.to_dict() for j in rows]
 
 
 if __name__ == "__main__":

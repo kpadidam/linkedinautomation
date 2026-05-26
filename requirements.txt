@@ -44,6 +44,10 @@ numpy>=2.2.2
 python-dateutil>=2.9.0
 PyPDF2>=3.0.1
 
+# Local semantic matching (auto-apply pipeline — slice 1)
+# Pulls torch + transformers + scikit-learn transitively; ~1.5GB on disk.
+sentence-transformers>=5.0.0
+
 # Scheduling
 apscheduler>=3.11.0
 schedule>=1.2.2

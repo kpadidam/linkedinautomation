@@ -159,7 +159,10 @@ export function JobTable({
               header: 'Why match',
               size: 220,
               cell: ({ row }: { row: { original: GroupedJob } }) => {
-                const reasons = (row.original.match_reasons || []).slice(0, 3)
+                // Defensive: legacy LLM matcher wrote list[str]; older
+                // serializations may have a dict — guard before .slice().
+                const raw = row.original.match_reasons
+                const reasons = Array.isArray(raw) ? raw.slice(0, 3) : []
                 if (reasons.length === 0) {
                   const skills = (row.original.skills || []).slice(0, 3)
                   if (skills.length === 0) return <span className="text-zinc-400 text-xs">—</span>

@@ -1175,7 +1175,23 @@ async def match_run(
 
         job.match_score = result.raw_score
         job.match_computed_at = datetime.utcnow()
-        job.match_reasons = result.to_dict()
+        # ``match_reasons`` is a list[str] by legacy contract (LLM matcher
+        # wrote human-readable bullets there and the dashboard's "Why match"
+        # column does ``reasons.slice(0,3)``). Render a list, not the
+        # structured MatchResult dict — that breaks the renderer.
+        reason_strs: List[str] = []
+        if result.must_haves_found:
+            reason_strs.append(
+                "matched: " + ", ".join(result.must_haves_found[:8])
+            )
+        if result.must_haves_missing:
+            reason_strs.append(
+                "missing: " + ", ".join(result.must_haves_missing[:6])
+            )
+        reason_strs.append(
+            f"semantic {result.semantic:.2f} · keyword {result.keyword:.2f}"
+        )
+        job.match_reasons = reason_strs
         if result.rejected_by is not None:
             job.apply_status = "not_eligible"
             rejected += 1

@@ -129,8 +129,7 @@ export default function ReviewQueueScreen() {
         <div>
           <h1 className="text-xl font-semibold">Review Queue</h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Triage newly discovered jobs · {filtered.length} of {jobs.length} · live
-            updates every 5s
+            Triage newly discovered jobs · {filtered.length} of {jobs.length} · live updates
           </p>
         </div>
       </div>

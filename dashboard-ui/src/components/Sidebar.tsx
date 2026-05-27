@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   FiGrid,
   FiInbox,
+  FiSend,
   FiTrello,
   FiActivity,
   FiSettings,
@@ -16,6 +17,8 @@ import { useSidebar } from '@/lib/sidebar'
 const links = [
   { to: '/', icon: FiGrid, label: 'Dashboard', end: true },
   { to: '/review-queue', icon: FiInbox, label: 'Review Queue' },
+  { to: '/apply-queue', icon: FiSend, label: 'Apply Queue' },
+  { to: '/apply-runs', icon: FiActivity, label: 'Apply Runs' },
   { to: '/pipeline', icon: FiTrello, label: 'Pipeline' },
   { to: '/calendar', icon: FiCalendar, label: 'Calendar' },
   { to: '/session', icon: FiActivity, label: 'Session' },

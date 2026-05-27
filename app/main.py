@@ -174,6 +174,19 @@ def _run_sqlite_migrations() -> None:
         ("jobs", "match_computed_at", "DATETIME"),
         ("user_profile", "auto_match_enabled", "BOOLEAN DEFAULT 1"),
         ("user_profile", "match_percentile_threshold", "INTEGER DEFAULT 90"),
+        # Auto-apply loop (slice 3) — safe defaults: bot is off until the
+        # operator explicitly enables it.
+        ("user_profile", "auto_apply_enabled", "BOOLEAN DEFAULT 0"),
+        ("user_profile", "daily_apply_cap", "INTEGER DEFAULT 15"),
+        ("user_profile", "quiet_hours_start", "INTEGER DEFAULT 23"),
+        ("user_profile", "quiet_hours_end", "INTEGER DEFAULT 7"),
+        ("user_profile", "last_apply_at", "DATETIME"),
+        ("user_profile", "circuit_tripped", "BOOLEAN DEFAULT 0"),
+        ("user_profile", "circuit_tripped_at", "DATETIME"),
+        ("user_profile", "circuit_tripped_reason", "VARCHAR(200)"),
+        ("user_profile", "circuit_consecutive_failures", "INTEGER DEFAULT 0"),
+        ("user_profile", "apply_browser_mode", "VARCHAR(50) DEFAULT 'chromium_ephemeral'"),
+        ("user_profile", "attached_chrome_port", "INTEGER DEFAULT 9222"),
     ]
     try:
         with engine.begin() as conn:
@@ -245,6 +258,115 @@ async def _auto_search_loop():
 
 
 _auto_search_task: Optional[asyncio.Task] = None
+_match_loop_task: Optional[asyncio.Task] = None
+_apply_loop_task: Optional[asyncio.Task] = None
+
+
+async def _match_loop():
+    """Periodic matcher tick. Embeds any Job that lacks a JobEmbedding row.
+
+    Cadence: every 10 minutes. Skips when ``auto_match_enabled`` is off
+    or the scrape session is mid-flight (Playwright + transformer model
+    in the same process is fine but the loops shouldn't fight for the
+    DB locks). Uses the same scoring path as ``POST /api/match/run`` —
+    this just removes the manual trigger.
+    """
+
+    TICK_SECONDS = 60
+    INTERVAL_MINUTES = 10
+    last_run_at: Optional[datetime] = None
+    while True:
+        try:
+            await asyncio.sleep(TICK_SECONDS)
+            if session_manager.is_running:
+                continue
+            now = datetime.utcnow()
+            due = (
+                last_run_at is None
+                or (now - last_run_at) >= timedelta(minutes=INTERVAL_MINUTES)
+            )
+            if not due:
+                continue
+            db = next(get_db())
+            try:
+                profile = db_manager.get_or_create_user_profile(db)
+                if not getattr(profile, "auto_match_enabled", True):
+                    continue
+                # Reuse the POST /api/match/run handler body would be neat
+                # but it expects a Depends-injected db; calling the inner
+                # core directly here keeps the loop independent of FastAPI
+                # dependency injection. For slice 3 we just invoke the
+                # endpoint function with our own session.
+                result = await match_run(limit=200, force=False, db=db)
+                last_run_at = now
+                if result.get("processed", 0) > 0:
+                    logger.info(f"[match_loop] {result}")
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"match loop tick failed: {e}")
+
+
+async def _apply_loop():
+    """Periodic apply tick. Picks one approved job, runs a dry navigation.
+
+    Cadence: every 5 minutes. The actual cadence between firings is
+    governed by ``services.pacing.should_apply_now`` (lognormal gap
+    around ~40min, quiet hours, daily cap). The 5-minute tick is just
+    how often we *consider* firing.
+
+    Slice 3 calls ``apply_runner.run_dry_apply`` — that's a navigation
+    + screenshot + state write, never a real submit.
+    """
+
+    TICK_SECONDS = 60
+    INTERVAL_MINUTES = 5
+    last_check_at: Optional[datetime] = None
+    while True:
+        try:
+            await asyncio.sleep(TICK_SECONDS)
+            now = datetime.utcnow()
+            due = (
+                last_check_at is None
+                or (now - last_check_at) >= timedelta(minutes=INTERVAL_MINUTES)
+            )
+            if not due:
+                continue
+            last_check_at = now
+
+            db = next(get_db())
+            try:
+                from services.pacing import should_apply_now
+                from services.apply_runner import run_dry_apply
+
+                profile = db_manager.get_or_create_user_profile(db)
+                decision = should_apply_now(profile, db, now=now)
+                if not decision.allowed:
+                    logger.debug(f"[apply_loop] skip: {decision.reason}")
+                    continue
+
+                job = (
+                    db.query(Job)
+                    .filter(Job.apply_status == "approved")
+                    .filter(Job.url.isnot(None))
+                    .order_by(Job.match_score.desc().nulls_last())
+                    .first()
+                )
+                if job is None:
+                    continue
+
+                logger.info(
+                    f"[apply_loop] firing dry-run on {job.job_id} ({job.title})"
+                )
+                await run_dry_apply(job, profile, db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"apply loop tick failed: {e}")
 
 
 @app.on_event("startup")
@@ -271,8 +393,12 @@ async def startup_event():
         logger.info("Resume matcher service initialized")
         
         # Kick off the auto-search scheduler (no-op if user has it disabled).
-        global _auto_search_task
+        global _auto_search_task, _match_loop_task, _apply_loop_task
         _auto_search_task = asyncio.create_task(_auto_search_loop())
+        # Slice 3 loops: match (every 10 min) + dry-run apply (every 5 min,
+        # pacing-gated). Both no-op if their respective toggles are off.
+        _match_loop_task = asyncio.create_task(_match_loop())
+        _apply_loop_task = asyncio.create_task(_apply_loop())
 
         logger.info(f"{settings.app_name} started successfully")
 
@@ -1192,13 +1318,19 @@ async def match_run(
             f"semantic {result.semantic:.2f} · keyword {result.keyword:.2f}"
         )
         job.match_reasons = reason_strs
+        # Operator/runtime states are sticky — the matcher must not flip an
+        # approved/applied/skipped job back to eligible on a rerun. Only
+        # mutate apply_status when it's a matcher-owned value.
+        matcher_owned = job.apply_status in (None, "", "eligible", "not_eligible")
         if result.rejected_by is not None:
-            job.apply_status = "not_eligible"
+            if matcher_owned:
+                job.apply_status = "not_eligible"
             rejected += 1
         else:
             scores.append(result.raw_score)
             passes = gate(result.raw_score, scores, percentile)
-            job.apply_status = "eligible" if passes else "not_eligible"
+            if matcher_owned:
+                job.apply_status = "eligible" if passes else "not_eligible"
             if scores:
                 rank = sum(1 for s in scores if s <= result.raw_score) / len(scores)
                 job.match_score_percentile = round(rank * 100, 2)
@@ -1233,6 +1365,170 @@ async def match_candidates(
     q = q.filter(Job.match_score.isnot(None))
     rows = q.order_by(Job.match_score.desc()).limit(limit).all()
     return [j.to_dict() for j in rows]
+
+
+# ---------------------------------------------------------------------------
+# Apply Queue (slice 2 — operator approval surface; no apply logic yet)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/apply/queue")
+async def apply_queue(
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """Eligible jobs awaiting operator approval, score-sorted descending.
+
+    This is the operator-facing list that powers the Apply Queue screen.
+    Once the operator clicks Approve, ``apply_status`` flips to
+    ``approved`` and slice 3's ``_apply_loop`` will pick it up. Skipped
+    jobs (``skipped_by_operator``) are sticky — the matcher leaves them
+    alone on subsequent reruns.
+    """
+
+    rows = (
+        db.query(Job)
+        .filter(Job.applied.is_(False))
+        .filter(Job.apply_status == "eligible")
+        .filter(Job.match_score.isnot(None))
+        .order_by(Job.match_score.desc())
+        .limit(limit)
+        .all()
+    )
+    return [j.to_dict() for j in rows]
+
+
+@app.post("/api/apply/approve/{job_id}")
+async def apply_approve(job_id: str, db: Session = Depends(get_db)):
+    """Operator-driven approval: flip ``eligible`` → ``approved``.
+
+    Refuses to approve jobs that aren't in ``eligible`` state — prevents
+    accidentally re-approving an already-approved job or applying to one
+    that the matcher rejected. Slice 3's apply loop will pick approved
+    rows up; this endpoint just sets state and returns.
+    """
+
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job.apply_status != "eligible":
+        raise HTTPException(
+            400,
+            f"Job is in state '{job.apply_status}', only 'eligible' jobs can be approved.",
+        )
+    job.apply_status = "approved"
+    db.commit()
+    return {"job_id": job_id, "apply_status": "approved"}
+
+
+@app.post("/api/apply/skip/{job_id}")
+async def apply_skip(job_id: str, db: Session = Depends(get_db)):
+    """Operator-driven skip: flip ``eligible`` → ``skipped_by_operator``.
+
+    Distinct from ``not_eligible`` (matcher's signal): ``skipped_by_operator``
+    is sticky, so the next ``/api/match/run`` won't re-promote the job
+    back into the queue. To un-skip, the operator must manually flip the
+    column (no UI for that in slice 2; intentional friction).
+    """
+
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job.apply_status not in ("eligible", "approved"):
+        raise HTTPException(
+            400,
+            f"Job is in state '{job.apply_status}', cannot skip from here.",
+        )
+    job.apply_status = "skipped_by_operator"
+    db.commit()
+    return {"job_id": job_id, "apply_status": "skipped_by_operator"}
+
+
+# ---------------------------------------------------------------------------
+# Apply Runs + circuit breaker (slice 3)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/apply/runs")
+async def apply_runs(
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """History of dry-run apply attempts. Newest first.
+
+    Each row is one ``ApplicationRun`` — see ``database/models.py`` for the
+    full state machine. Slice 3 mostly emits ``submitted_dry_run`` /
+    ``blocked_*`` / ``failed_*``; slice 5 adds ``submitted`` (real).
+    """
+
+    from database.models import ApplicationRun
+
+    rows = (
+        db.query(ApplicationRun)
+        .order_by(ApplicationRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [r.to_dict() for r in rows]
+
+
+@app.get("/api/apply/runs/{run_id}/screenshot/{n}")
+async def apply_run_screenshot(
+    run_id: int, n: int, db: Session = Depends(get_db)
+):
+    """Serve one screenshot from an apply run, indexed 0..N-1.
+
+    Path traversal is impossible — paths are looked up via the JSON
+    column, not constructed from user input. Returns 404 if the run
+    doesn't exist, the index is out of range, or the file is gone.
+    """
+
+    from database.models import ApplicationRun
+
+    run = db.query(ApplicationRun).filter(ApplicationRun.id == run_id).first()
+    if not run:
+        raise HTTPException(404, f"Run {run_id} not found")
+    paths = run.screenshot_paths or []
+    if n < 0 or n >= len(paths):
+        raise HTTPException(404, f"Screenshot index {n} out of range")
+    path = paths[n]
+    if not _os.path.exists(path):
+        raise HTTPException(404, f"Screenshot file missing: {path}")
+    return FileResponse(path, media_type="image/png")
+
+
+@app.post("/api/apply/circuit/reset")
+async def apply_circuit_reset(db: Session = Depends(get_db)):
+    """Operator-only circuit-breaker reset.
+
+    Called after the operator investigates a tripped breaker (captcha,
+    /checkpoint/ redirect, etc.) and resolves the underlying LinkedIn
+    state. Clears ``circuit_tripped`` and the consecutive-failure
+    counter so the apply loop can resume.
+    """
+
+    from services.circuit_breaker import reset_breaker
+
+    profile = db_manager.get_or_create_user_profile(db)
+    was_tripped = bool(profile.circuit_tripped)
+    reset_breaker(profile, db)
+    return {
+        "reset": True,
+        "was_tripped": was_tripped,
+    }
+
+
+@app.get("/api/apply/circuit/status")
+async def apply_circuit_status(db: Session = Depends(get_db)):
+    """Read the breaker state. Powers the UI banner when tripped."""
+
+    profile = db_manager.get_or_create_user_profile(db)
+    return {
+        "tripped": bool(profile.circuit_tripped),
+        "tripped_at": _utc_iso(profile.circuit_tripped_at),
+        "reason": profile.circuit_tripped_reason,
+        "consecutive_failures": int(profile.circuit_consecutive_failures or 0),
+    }
 
 
 if __name__ == "__main__":

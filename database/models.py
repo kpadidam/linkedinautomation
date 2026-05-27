@@ -241,6 +241,30 @@ class UserProfile(Base):
     auto_match_enabled = Column(Boolean, default=True)
     match_percentile_threshold = Column(Integer, default=90)
 
+    # Auto-apply loop (slice 3). ``auto_apply_enabled`` defaults False — the
+    # bot will NEVER attempt to apply until the operator flips this. Apply
+    # cadence is governed by ``pacing.py`` (lognormal gap + quiet hours +
+    # daily cap). Slice 3 only runs dry-run navigations (no real submit);
+    # slices 4-5 ship the actual ATS adapters.
+    auto_apply_enabled = Column(Boolean, default=False)
+    daily_apply_cap = Column(Integer, default=15)
+    quiet_hours_start = Column(Integer, default=23)  # local hour (0-23)
+    quiet_hours_end = Column(Integer, default=7)     # local hour (0-23)
+    last_apply_at = Column(DateTime, nullable=True)
+    # Circuit breaker state — flipped by services/circuit_breaker.py when
+    # any LinkedIn-specific tripwire fires (999, /checkpoint/, captcha,
+    # etc.). Sticky until operator-initiated reset.
+    circuit_tripped = Column(Boolean, default=False)
+    circuit_tripped_at = Column(DateTime, nullable=True)
+    circuit_tripped_reason = Column(String(200), nullable=True)
+    circuit_consecutive_failures = Column(Integer, default=0)
+    # Browser acquisition mode used by services/browser_acquirer.py.
+    # Valid: 'attached_chrome' | 'chromium_persistent' | 'chromium_ephemeral'.
+    # Slice 3 only exercises ``chromium_ephemeral`` (fresh launch, no real
+    # LinkedIn cookies touched); slices 4-5 enable the others.
+    apply_browser_mode = Column(String(50), default="chromium_ephemeral")
+    attached_chrome_port = Column(Integer, default=9222)
+
     # Feature flags / scraper toggles (persisted; UI-editable)
     enable_resume_matching = Column(Boolean, default=True)
     headless_browser = Column(Boolean, default=True)
@@ -371,6 +395,68 @@ class JobEmbedding(Base):
             f"<JobEmbedding(job_id='{self.job_id}', "
             f"model='{self.embedding_model}')>"
         )
+
+
+class ApplicationRun(Base):
+    """One attempt by the auto-apply loop to apply to one job.
+
+    State semantics (per-attempt, distinct from ``Job.apply_status``):
+
+      opened             — browser launched and navigated to job.url
+      form_parsed        — adapter identified an Easy Apply / ATS form
+      needs_user_input   — adapter requires operator intervention (slice 4+)
+      ready_to_submit    — about to click submit (slice 4+)
+      submitted          — real submission succeeded (slice 5+)
+      submitted_dry_run  — slice-3 terminal: opened + dwelled, never clicked
+      blocked_captcha    — captcha iframe detected, halted
+      blocked_auth       — /checkpoint/ redirect or li_at expired, halted
+      failed_retryable   — transient (network, timeout) — loop retries later
+      failed_terminal    — fatal (DOM gone, 3+ consecutive fails) — halted
+
+    Screenshots are stored as a list of absolute paths under
+    ``data/apply_runs/{run_id}/``. ``form_log`` is reserved for slice 4
+    when adapters log every field they fill — empty in slice 3.
+    """
+
+    __tablename__ = "application_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(String(100), nullable=False, index=True)
+    # 'easy_apply' | 'greenhouse' | 'workday' | 'lever' | 'unknown'.
+    # Slice 3 always writes 'unknown' since adapters don't exist yet.
+    ats = Column(String(50), nullable=False, default="unknown")
+    state = Column(String(50), nullable=False, index=True)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    exit_reason = Column(String(200), nullable=True)
+    screenshot_paths = Column(JSON, nullable=True)  # list[str]
+    form_log = Column(JSON, nullable=True)          # list[{label, value, source}]
+    error_message = Column(Text, nullable=True)
+    # Normalized identity hash for cross-source dedup (slice 4): keeps us
+    # from double-applying to the same role posted on LinkedIn and a
+    # direct ATS link. Slice 3 populates it but doesn't gate on it yet.
+    dedup_key = Column(String(200), nullable=True, index=True)
+
+    def __repr__(self):
+        return (
+            f"<ApplicationRun(id={self.id}, job_id='{self.job_id}', "
+            f"state='{self.state}')>"
+        )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "job_id": self.job_id,
+            "ats": self.ats,
+            "state": self.state,
+            "started_at": _utc_iso(self.started_at),
+            "ended_at": _utc_iso(self.ended_at),
+            "exit_reason": self.exit_reason,
+            "screenshot_paths": self.screenshot_paths or [],
+            "form_log": self.form_log or [],
+            "error_message": self.error_message,
+            "dedup_key": self.dedup_key,
+        }
 
 
 # Create engine and session

@@ -34,7 +34,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Optional
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -234,6 +234,36 @@ def captcha_iframe_present(html: str) -> bool:
         or "funcaptcha.com" in lo
         or "hcaptcha.com" in lo
         or "www.google.com/recaptcha" in lo
+    )
+
+
+def job_unavailable_present(html: str, page_title: str | None = None) -> bool:
+    """Detect a removed-job page (LinkedIn renders ``Page not found``).
+
+    Job postings get pulled all the time; the apply runner shouldn't
+    classify those as ``submitted_dry_run``. Distinct from auth-wall and
+    captcha — this is a legitimate "this content no longer exists"
+    signal, not a security event, so it doesn't burn the breaker.
+
+    LinkedIn's 404 template uses a literal ``"Page not found"`` title
+    plus a recognizable body string. We require BOTH signals to avoid
+    false positives on JD pages that happen to mention 404s in their
+    text.
+    """
+
+    title = (page_title or "").lower()
+    if "page not found" in title:
+        return True
+    if not html:
+        return False
+    lo = html.lower()
+    return (
+        "page not found" in lo
+        and (
+            "this page doesn" in lo  # "...doesn't exist..."
+            or "the link you visited" in lo
+            or "go to your feed" in lo
+        )
     )
 
 

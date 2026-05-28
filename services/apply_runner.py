@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import random
 import re
 from datetime import datetime
@@ -42,6 +41,7 @@ from services.circuit_breaker import (
     CircuitTripped,
     auth_wall_present,
     captcha_iframe_present,
+    job_unavailable_present,
 )
 
 logger = logging.getLogger(__name__)
@@ -175,6 +175,23 @@ async def run_dry_apply(job: Job, profile, db: Session) -> ApplicationRun:
             breaker.trip("captcha_iframe")  # raises
             return run  # unreachable; for type-check
 
+        # Removed-job page (LinkedIn 404). Mark unavailable, mark the job
+        # itself so it drops out of the apply queue, and exit cleanly. Not
+        # a security event — don't touch the breaker.
+        page_title = await page.title()
+        if job_unavailable_present(html, page_title):
+            run.state = "failed_unavailable"
+            run.exit_reason = "job_removed_404"
+            run.ended_at = datetime.utcnow()
+            run.screenshot_paths = screenshots
+            job.apply_status = "failed_unavailable"
+            profile.last_apply_at = datetime.utcnow()
+            db.commit()
+            logger.info(
+                f"[apply_runner] job {job.job_id} no longer available (404)"
+            )
+            return run
+
         # Auth wall on an ephemeral browser is normal (no li_at). Don't trip
         # the breaker — just record it and exit cleanly. Slice 5 ships
         # attached-Chrome mode which carries a real session.
@@ -196,17 +213,131 @@ async def run_dry_apply(job: Job, profile, db: Session) -> ApplicationRun:
         await page.screenshot(path=str(rendered_png), full_page=True)
         screenshots.append(str(rendered_png))
 
-        # --- success: dry-run terminal ---
-        run.state = "submitted_dry_run"
-        run.exit_reason = "dry_run_complete"
+        # --- Cross-source dedup check before handing off to any adapter.
+        # Same role across LinkedIn + Greenhouse direct = double-apply.
+        from services.dedup import is_duplicate
+        is_dup, prior = is_duplicate(db, job.company, job.title, job.location)
+        if is_dup:
+            run.state = "skipped_duplicate"
+            run.exit_reason = (
+                f"dup_of_run_{prior.id}" if prior else "dup_of_prior_run"
+            )
+            run.ended_at = datetime.utcnow()
+            run.screenshot_paths = screenshots
+            db.commit()
+            logger.info(
+                f"[apply_runner] dedup skip for {job.job_id}: matches prior run {prior.id if prior else '?'}"
+            )
+            return run
+
+        # --- Detect ATS and dispatch to the right adapter.
+        from services.ats import detect_ats, ApplyStatus
+        ats_kind, adapter_cls = await detect_ats(job.url or "", page)
+        run.ats = ats_kind.value
+        db.commit()
+
+        if adapter_cls is None:
+            # Unknown ATS. Slice 6 will fall through to browser-use here
+            # if the operator opted in; for slice 4 we surface as a
+            # dry-run completion that the operator can review.
+            run.state = "submitted_dry_run"
+            run.exit_reason = "unknown_ats"
+            run.ended_at = datetime.utcnow()
+            run.screenshot_paths = screenshots
+            job.apply_status = "dry_run_complete"
+            profile.last_apply_at = datetime.utcnow()
+            db.commit()
+            breaker.record_success()
+            logger.info(
+                f"[apply_runner] unknown ATS for {job.job_id} — recorded as dry-run"
+            )
+            return run
+
+        adapter = adapter_cls()
+        adapter_dry_run = True  # slice 4 forces dry_run regardless of operator flag
+        try:
+            result = await adapter.apply(
+                page=page,
+                job=job,
+                profile=profile,
+                dry_run=adapter_dry_run,
+            )
+        except Exception as e:  # noqa: BLE001
+            run.state = "failed_retryable"
+            run.exit_reason = f"adapter_{ats_kind.value}_raised"
+            run.error_message = str(e)[:1000]
+            run.ended_at = datetime.utcnow()
+            run.screenshot_paths = screenshots
+            db.commit()
+            breaker.record_consecutive_failure()
+            logger.exception(
+                f"[apply_runner] {ats_kind.value} adapter raised for {job.job_id}"
+            )
+            return run
+
+        # Lift adapter screenshots into the run dir + persist form_log.
+        for shot in result.screenshots or []:
+            # Adapters return relative names; resolve against run_dir or
+            # accept absolute paths verbatim.
+            if not shot:
+                continue
+            if shot.startswith("/") or shot.startswith(str(run_dir)):
+                screenshots.append(shot)
+            else:
+                screenshots.append(str(run_dir / shot))
+        if result.fields_logged:
+            run.form_log = [
+                {
+                    "label": f.label,
+                    "value": f.value,
+                    "source": f.source,
+                    "confidence": f.confidence,
+                    "selector": f.selector,
+                }
+                for f in result.fields_logged
+            ]
+
+        run.state = result.status.value
+        run.exit_reason = result.exit_reason or result.status.value
+        run.error_message = result.error_message
         run.ended_at = datetime.utcnow()
         run.screenshot_paths = screenshots
-        job.apply_status = "dry_run_complete"
         profile.last_apply_at = datetime.utcnow()
+
+        # Mirror adapter outcome into Job.apply_status so the apply queue
+        # query stops surfacing this job.
+        if result.status in (
+            ApplyStatus.SUBMITTED,
+            ApplyStatus.SUBMITTED_DRY_RUN,
+        ):
+            job.apply_status = (
+                "applied"
+                if result.status == ApplyStatus.SUBMITTED
+                else "dry_run_complete"
+            )
+            if result.status == ApplyStatus.SUBMITTED:
+                job.applied = True
+                job.applied_date = datetime.utcnow()
+        elif result.status == ApplyStatus.SKIPPED_DUPLICATE:
+            job.apply_status = "skipped_duplicate"
+        elif result.status == ApplyStatus.SKIPPED_REQUIRES_COVER_LETTER:
+            job.apply_status = "skipped_requires_cover_letter"
+        elif result.status == ApplyStatus.FAILED_UNAVAILABLE:
+            job.apply_status = "failed_unavailable"
+        # Other outcomes (NEEDS_USER_INPUT / BLOCKED_* / FAILED_*) leave
+        # apply_status alone — operator decides what to do next.
+
         db.commit()
-        breaker.record_success()
+        if result.status in (ApplyStatus.SUBMITTED, ApplyStatus.SUBMITTED_DRY_RUN):
+            breaker.record_success()
+        elif result.status in (
+            ApplyStatus.FAILED_RETRYABLE,
+            ApplyStatus.FAILED_TERMINAL,
+        ):
+            breaker.record_consecutive_failure()
         logger.info(
-            f"[apply_runner] dry-run ok: job={job.job_id} screenshots={len(screenshots)}"
+            f"[apply_runner] {ats_kind.value} -> {result.status.value} "
+            f"({result.exit_reason}) for {job.job_id}"
         )
         return run
 

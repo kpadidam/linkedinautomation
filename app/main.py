@@ -138,6 +138,15 @@ class SettingsUpdateRequest(BaseModel):
     search_frequency_minutes: Optional[int] = Field(None, ge=30, le=1440)
     min_match_score_alert: Optional[float] = None
     email_notifications: Optional[bool] = None
+    # Auto-apply controls (slice 3 backend, polish-pass UI). Off by default;
+    # the operator must explicitly flip auto_apply_enabled in the Settings
+    # tab. Ranges below match the safety floors discussed in paircode r2:
+    # 1-50 applies/day, valid 24h-clock hours, three browser modes.
+    auto_apply_enabled: Optional[bool] = None
+    daily_apply_cap: Optional[int] = Field(None, ge=1, le=50)
+    quiet_hours_start: Optional[int] = Field(None, ge=0, le=23)
+    quiet_hours_end: Optional[int] = Field(None, ge=0, le=23)
+    apply_browser_mode: Optional[str] = None  # validated below in the endpoint
     # Secrets: empty string => clear (use .env fallback). null => no change.
     openai_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
@@ -714,6 +723,19 @@ def _settings_doc(profile) -> Dict[str, Any]:
         "search_frequency_minutes": _effective_frequency_minutes(profile),
         "min_match_score_alert": float(profile.min_match_score_alert or 0.0),
         "email_notifications": bool(profile.email_notifications),
+        # Auto-apply (slice 3). Surface defaults defensively so the UI can
+        # render even on a fresh DB before migrations populate columns.
+        "auto_apply_enabled": bool(getattr(profile, "auto_apply_enabled", False)),
+        "daily_apply_cap": int(getattr(profile, "daily_apply_cap", 15) or 15),
+        "quiet_hours_start": int(
+            getattr(profile, "quiet_hours_start", 23) if getattr(profile, "quiet_hours_start", None) is not None else 23
+        ),
+        "quiet_hours_end": int(
+            getattr(profile, "quiet_hours_end", 7) if getattr(profile, "quiet_hours_end", None) is not None else 7
+        ),
+        "apply_browser_mode": (
+            getattr(profile, "apply_browser_mode", None) or "chromium_ephemeral"
+        ),
         "secrets": {
             "openai_configured": openai_ok,
             "openai_source": openai_src,
@@ -827,6 +849,27 @@ async def update_settings(
         prev = db_manager.get_or_create_user_profile(db)
         if not prev.auto_search_enabled:
             updates["last_auto_search"] = datetime.utcnow()
+
+    # Validate apply_browser_mode against the acquirer's known set.
+    if "apply_browser_mode" in updates and updates["apply_browser_mode"] is not None:
+        from services.browser_acquirer import VALID_MODES
+        if updates["apply_browser_mode"] not in VALID_MODES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"apply_browser_mode must be one of {VALID_MODES}",
+            )
+
+    # Quiet hours sanity — same value top and bottom is fine (means "no quiet
+    # window"), but reject obvious typos like 25 (caught by Field range too).
+    if "quiet_hours_start" in updates or "quiet_hours_end" in updates:
+        prev = db_manager.get_or_create_user_profile(db)
+        s = updates.get("quiet_hours_start", prev.quiet_hours_start)
+        e = updates.get("quiet_hours_end", prev.quiet_hours_end)
+        if s is not None and e is not None and not (0 <= s <= 23 and 0 <= e <= 23):
+            raise HTTPException(
+                status_code=400,
+                detail="quiet_hours_* must be 0-23 (24h local)",
+            )
 
     if updates:
         success = db_manager.update_user_profile(db, **updates)
@@ -1444,6 +1487,95 @@ async def apply_skip(job_id: str, db: Session = Depends(get_db)):
     return {"job_id": job_id, "apply_status": "skipped_by_operator"}
 
 
+# A job is re-promotable when it's in any terminal state the operator
+# might want to retry. ``applied`` is intentionally NOT here — re-applying
+# to the same job is almost always a mistake.
+_REPROMOTABLE_STATES = (
+    "dry_run_complete",
+    "skipped_by_operator",
+    "skipped_duplicate",
+    "skipped_requires_cover_letter",
+    "failed_retryable",
+    "failed_terminal",
+    "failed_unavailable",
+    "not_eligible",
+)
+
+
+@app.post("/api/apply/re-promote/{job_id}")
+async def apply_re_promote(job_id: str, db: Session = Depends(get_db)):
+    """Flip a job from any retryable terminal state back to ``approved``.
+
+    Lets the operator re-test a job after a dry-run, a skip, or a
+    failure — without poking SQL by hand. Refuses to re-promote
+    ``applied`` (deliberately) and active states (``applying``,
+    ``approved``, ``eligible``) since those don't make sense.
+    """
+
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job.apply_status not in _REPROMOTABLE_STATES:
+        raise HTTPException(
+            400,
+            f"Job is in state '{job.apply_status}', "
+            f"not in re-promotable set {_REPROMOTABLE_STATES}",
+        )
+    prior = job.apply_status
+    job.apply_status = "approved"
+    db.commit()
+    return {"job_id": job_id, "prior_status": prior, "apply_status": "approved"}
+
+
+@app.post("/api/apply/now/{job_id}")
+async def apply_now(job_id: str, db: Session = Depends(get_db)):
+    """Fire the apply runner for a single job RIGHT NOW.
+
+    Bypasses the 5-minute apply loop tick so the operator gets immediate
+    feedback. Still honors the kill switch indirectly: if
+    ``auto_apply_enabled`` is False, the runner stays in dry-run mode
+    (parses + screenshots + does not click Submit). If True AND the
+    detected ATS adapter supports submit, this can be a real application.
+
+    Pacing/quiet-hours/daily-cap are NOT enforced here — this is the
+    operator explicitly saying "do it now." The circuit breaker IS
+    still respected: if it's tripped, the runner refuses to spawn.
+    """
+    from services.apply_runner import run_dry_apply
+
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if not job.url:
+        raise HTTPException(400, "Job has no URL — cannot apply")
+
+    profile = db_manager.get_or_create_user_profile(db)
+    if profile.circuit_tripped:
+        raise HTTPException(
+            409,
+            f"Circuit breaker tripped ({profile.circuit_tripped_reason}). "
+            "Reset via /api/apply/circuit/reset and try again.",
+        )
+
+    # Flip to approved so anyone watching the apply queue sees the
+    # transition, then immediately fire the runner. We do NOT wait for
+    # the _apply_loop tick.
+    if job.apply_status != "approved":
+        job.apply_status = "approved"
+        db.commit()
+
+    logger.info(f"[apply_now] operator-triggered apply on {job_id} ({job.title})")
+    run = await run_dry_apply(job, profile, db)
+    db.refresh(run)
+    return {
+        "run_id": run.id,
+        "state": run.state,
+        "exit_reason": run.exit_reason,
+        "ats": run.ats,
+        "screenshots": run.screenshot_paths or [],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Apply Runs + circuit breaker (slice 3)
 # ---------------------------------------------------------------------------
@@ -1516,6 +1648,103 @@ async def apply_circuit_reset(db: Session = Depends(get_db)):
         "reset": True,
         "was_tripped": was_tripped,
     }
+
+
+@app.post("/api/apply/browser/test-attached")
+async def apply_browser_test_attached(
+    port: Optional[int] = None, db: Session = Depends(get_db)
+):
+    """Verify that ``attached_chrome`` mode can talk to a live Chrome.
+
+    Tries ``connect_over_cdp(http://127.0.0.1:{port})`` once and returns
+    a diagnostic doc the UI can render. On failure we surface the exact
+    macOS terminal command the operator needs to run — Chrome 136+
+    requires ``--user-data-dir`` to honor the debug port, and we tell
+    them so explicitly instead of letting them debug "connection
+    refused" alone.
+
+    Does NOT spawn an apply run or open any tabs in the operator's
+    Chrome — pure connectivity check.
+    """
+
+    profile = db_manager.get_or_create_user_profile(db)
+    chosen_port = int(port or getattr(profile, "attached_chrome_port", 9222) or 9222)
+    cmd_hint = (
+        '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome '
+        f'--remote-debugging-port={chosen_port} '
+        '--user-data-dir="$HOME/chrome-debug-profile"'
+    )
+
+    # Local import: heavy
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError as e:
+        raise HTTPException(500, f"Playwright not installed: {e}")
+
+    pw = await async_playwright().start()
+    try:
+        try:
+            browser = await pw.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{chosen_port}"
+            )
+        except Exception as e:  # noqa: BLE001
+            return {
+                "ok": False,
+                "port": chosen_port,
+                "error": f"{type(e).__name__}: {str(e)[:300]}",
+                "hint": (
+                    "Chrome isn't listening on this debug port. Launch it "
+                    "with a dedicated debug profile (Chrome 136+ requires "
+                    "--user-data-dir), then sign into LinkedIn in that "
+                    "Chrome window:"
+                ),
+                "command": cmd_hint,
+            }
+
+        # Probe contexts/pages so we know there's actually a usable session.
+        contexts = browser.contexts
+        n_contexts = len(contexts)
+        n_pages = 0
+        sample_urls: list[str] = []
+        signed_into_linkedin = False
+        for ctx in contexts:
+            for page in ctx.pages:
+                n_pages += 1
+                u = page.url or ""
+                if len(sample_urls) < 5 and u and u != "about:blank":
+                    sample_urls.append(u)
+                if "linkedin.com" in u:
+                    signed_into_linkedin = True
+                # Read cookies to confirm li_at presence — that's the
+                # real signal we'll need at apply time.
+            try:
+                cookies = await ctx.cookies("https://www.linkedin.com")
+                if any(c.get("name") == "li_at" for c in cookies):
+                    signed_into_linkedin = True
+            except Exception:  # noqa: BLE001
+                pass
+
+        version = browser.version
+        await browser.close()  # detaches us; doesn't kill Chrome
+
+        return {
+            "ok": True,
+            "port": chosen_port,
+            "chrome_version": version,
+            "contexts": n_contexts,
+            "pages_open": n_pages,
+            "sample_urls": sample_urls,
+            "linkedin_session_detected": signed_into_linkedin,
+            "hint": (
+                "Connection works."
+                + ("" if signed_into_linkedin else " But this Chrome isn't signed into LinkedIn — open linkedin.com and log in in that window before running an apply.")
+            ),
+        }
+    finally:
+        try:
+            await pw.stop()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @app.get("/api/apply/circuit/status")

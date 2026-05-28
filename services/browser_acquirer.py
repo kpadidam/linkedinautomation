@@ -82,16 +82,39 @@ async def acquire(
     pw = await async_playwright().start()
 
     if mode == "attached_chrome":
-        browser = await pw.chromium.connect_over_cdp(
-            f"http://127.0.0.1:{attached_port}"
-        )
+        try:
+            browser = await pw.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{attached_port}"
+            )
+        except Exception as e:
+            await pw.stop()
+            raise RuntimeError(
+                f"Cannot connect to Chrome on debug port {attached_port}. "
+                f"Per Chrome 136+ you must run Chrome with a dedicated debug "
+                f"profile, e.g.:\n"
+                f"  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome "
+                f"--remote-debugging-port={attached_port} "
+                f"--user-data-dir=$HOME/chrome-debug-profile\n"
+                f"Original error: {e}"
+            ) from e
+
         # CDP attach gives us the existing default context — re-use it.
         contexts = browser.contexts
-        context = contexts[0] if contexts else await browser.new_context()
+        if not contexts:
+            await browser.close()
+            await pw.stop()
+            raise RuntimeError(
+                "Attached Chrome has no browser contexts. Make sure a window "
+                "is open in the debug-port Chrome instance."
+            )
+        context = contexts[0]
         page = await context.new_page()
 
         async def cleanup():
-            await page.close()
+            try:
+                await page.close()
+            except Exception:  # noqa: BLE001
+                pass
             # Don't close the context or browser — we don't own them.
             await pw.stop()
 

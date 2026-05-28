@@ -25,11 +25,9 @@ operator has a sense of the noise floor.
 from __future__ import annotations
 
 import logging
-import math
 import random
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
-from typing import Tuple
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -113,6 +111,20 @@ def _applies_today(db: Session, since_utc: datetime) -> int:
     )
 
 
+# Weekday/weekend cap multiplier per paircode r2. Real humans apply less
+# on weekends; the bot should too. 1.0 weekday, 0.4 weekend.
+_WEEKEND_CAP_MULTIPLIER = 0.4
+
+
+def _effective_daily_cap(profile, now: datetime) -> int:
+    base = int(profile.daily_apply_cap or 15)
+    # Monday=0 .. Sunday=6 in datetime.weekday()
+    is_weekend = now.replace(tzinfo=timezone.utc).astimezone().weekday() >= 5
+    if is_weekend:
+        return max(1, int(base * _WEEKEND_CAP_MULTIPLIER))
+    return base
+
+
 def should_apply_now(
     profile,
     db: Session,
@@ -139,7 +151,7 @@ def should_apply_now(
     local_now = now.replace(tzinfo=timezone.utc).astimezone()
     local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     day_start_utc = local_midnight.astimezone(timezone.utc).replace(tzinfo=None)
-    cap = int(profile.daily_apply_cap or 15)
+    cap = _effective_daily_cap(profile, now)
     applied_today = _applies_today(db, day_start_utc)
     if applied_today >= cap:
         return PacingDecision(False, f"daily_cap_hit[{applied_today}/{cap}]", None)

@@ -35,3 +35,21 @@ export function useResetCircuit() {
     },
   })
 }
+
+/**
+ * Re-promote a job from a terminal state (dry_run_complete / skipped_* /
+ * failed_*) back to ``approved`` so the apply loop will retry it. Useful
+ * for re-testing after fixing whatever caused the prior outcome, without
+ * poking SQL by hand.
+ */
+export function useRePromoteJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (jobId: string) => api.applyRePromote(jobId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['apply-runs'] })
+      qc.invalidateQueries({ queryKey: ['apply-queue'] })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
+}

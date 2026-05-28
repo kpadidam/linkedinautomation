@@ -7,11 +7,13 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { useMemo, useState } from 'react'
-import { FiBookmark, FiTag, FiExternalLink, FiCopy, FiArrowRight } from 'react-icons/fi'
+import { FiBookmark, FiTag, FiExternalLink, FiCopy, FiArrowRight, FiSend, FiLoader } from 'react-icons/fi'
+import { useNavigate } from 'react-router-dom'
 import type { Job } from '@/lib/types'
 import { cn, effectiveMatchScore, formatRelative, nextActionFor, scoreColor } from '@/lib/utils'
 import { useUpdateJob } from '@/hooks/useJobs'
 import { useSettings } from '@/hooks/useSettings'
+import { useApplyNow } from '@/hooks/useApplyQueue'
 import { StatusSelect } from './StatusSelect'
 
 type GroupedJob = Job & { _dupCount?: number }
@@ -218,12 +220,9 @@ export function JobTable({
       {
         id: 'next_action',
         header: 'Next action',
-        size: 130,
+        size: 140,
         cell: ({ row }) => (
-          <span className="inline-flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300">
-            <FiArrowRight className="h-3 w-3 text-brand-500" />
-            {nextActionFor(row.original.status)}
-          </span>
+          <NextActionCell job={row.original} />
         ),
       },
       {
@@ -340,3 +339,49 @@ export function JobTable({
     </div>
   )
 }
+
+
+function NextActionCell({ job }: { job: Job }) {
+  const navigate = useNavigate()
+  const applyNow = useApplyNow()
+  const label = nextActionFor(job.status)
+  // Only the "Apply" verbs are wired to the runner. Other actions
+  // (Follow up, Prep call, ...) stay as informational chips until the
+  // matching pipeline ships for them.
+  const isApply = label === "Apply"
+
+  if (!isApply) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300">
+        <FiArrowRight className="h-3 w-3 text-brand-500" />
+        {label}
+      </span>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={applyNow.isPending}
+      onClick={(e) => {
+        e.stopPropagation()
+        applyNow.mutate(job.job_id, {
+          onSuccess: (res) => {
+            // Take the operator straight to the row that just appeared.
+            navigate(`/apply-runs#run-${res.run_id}`)
+          },
+        })
+      }}
+      className="inline-flex items-center gap-1 text-xs rounded-md px-2 py-1 border border-brand-500 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-950 disabled:opacity-50"
+      title="Run the apply bot on this job right now. Bypasses the 5-minute loop tick + pacing gates. Still respects the circuit breaker."
+    >
+      {applyNow.isPending ? (
+        <FiLoader className="h-3 w-3 animate-spin" />
+      ) : (
+        <FiSend className="h-3 w-3" />
+      )}
+      {applyNow.isPending ? "Applying…" : "Apply"}
+    </button>
+  )
+}
+

@@ -11,11 +11,12 @@ import {
   FiCheckCircle,
   FiAlertCircle,
   FiPlay,
+  FiSquare,
   FiFileText,
 } from 'react-icons/fi'
 import { useJobs, useStatistics, useSearches } from '@/hooks/useJobs'
 import { useFollowups } from '@/hooks/useInterviews'
-import { useSessionStatus } from '@/hooks/useSession'
+import { useSessionStatus, useStartSession, useStopSession } from '@/hooks/useSession'
 import { useSettings } from '@/hooks/useSettings'
 import { useSetupStatus } from '@/hooks/useSetup'
 import { StatCard } from '@/components/StatCard'
@@ -37,6 +38,8 @@ export default function DashboardScreen() {
   const { data: setup } = useSetupStatus()
   const { data: sessionStatus } = useSessionStatus()
   const sessionRunning = !!sessionStatus?.running
+  const startSession = useStartSession()
+  const stopSession = useStopSession()
   const matchingEnabled = settings?.enable_resume_matching ?? true
   const [openId, setOpenId] = useState<string | null>(null)
 
@@ -158,9 +161,37 @@ export default function DashboardScreen() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link to="/session" className="btn-primary">
-            <FiPlay className="h-4 w-4" /> {sessionRunning ? 'View Live Session' : 'Start Session'}
-          </Link>
+          {sessionRunning ? (
+            <>
+              <button
+                type="button"
+                onClick={() => stopSession.mutate()}
+                disabled={stopSession.isPending}
+                className="btn-primary"
+                title="Stop the running scrape — kills the subprocess"
+              >
+                <FiSquare className="h-4 w-4" /> Stop Session
+              </button>
+              <Link to="/session" className="btn-ghost">
+                <FiPlay className="h-4 w-4" /> View Live Logs
+              </Link>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => startSession.mutate()}
+              disabled={startSession.isPending || !setup?.complete}
+              className="btn-primary"
+              title={
+                setup?.complete
+                  ? 'Spawn the scraper for your configured search roles'
+                  : 'Setup incomplete — visit Settings first'
+              }
+            >
+              <FiPlay className="h-4 w-4" />
+              {startSession.isPending ? 'Starting…' : 'Start Session'}
+            </button>
+          )}
           <Link to="/review-queue" className="btn-ghost">
             <FiInbox className="h-4 w-4" /> Review Queue
           </Link>

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
-import { FiChevronUp, FiChevronDown } from 'react-icons/fi'
+import { useMutation } from '@tanstack/react-query'
+import { FiAlertOctagon, FiCheck, FiChevronUp, FiChevronDown, FiRefreshCw, FiX, FiZap } from 'react-icons/fi'
 import {
   SettingsCard,
   FieldRow,
+  Select,
   TextInput,
   Toggle,
 } from './_components'
 import { useSessionStatus } from '@/hooks/useSession'
 import { useSettings, useUpdateSettings } from '@/hooks/useSettings'
-import { cn } from '@/lib/utils'
+import { useCircuitStatus, useResetCircuit } from '@/hooks/useApplyRuns'
+import { api } from '@/lib/api'
+import { cn, formatRelative } from '@/lib/utils'
 
 // Hard floor — any value below this is rejected client-side. The 30-minute
 // minimum is the rate-limit guardrail; sustained sub-30m polling will get
@@ -213,6 +217,8 @@ export default function AutomationScreen() {
         </FieldRow>
       </SettingsCard>
 
+      <AutoApplyCard />
+
       <SettingsCard
         title="Notifications"
         subtitle="Email me when something interesting hits the queue"
@@ -239,6 +245,257 @@ export default function AutomationScreen() {
           />
         </FieldRow>
       </SettingsCard>
+    </div>
+  )
+}
+
+/**
+ * Auto-apply controls. Lives inside Automation Settings as a sibling
+ * card to "Auto-Search" — both gate the same kind of cron-like
+ * background work, just for different stages of the pipeline.
+ *
+ * The kill switch (auto_apply_enabled) gets prominent visual weight
+ * because slice 4+ will ship code that actually clicks Submit. The
+ * operator must trust that this toggle does what it says.
+ */
+function AutoApplyCard() {
+  const settings = useSettings()
+  const updateSettings = useUpdateSettings()
+  const { data: circuit } = useCircuitStatus()
+  const resetCircuit = useResetCircuit()
+
+  // Defensive defaults: a fresh-cloned DB or a settings response that
+  // races migrations could omit these. Render *something* sensible.
+  const enabled = settings.data?.auto_apply_enabled ?? false
+  const cap = settings.data?.daily_apply_cap ?? 15
+  const qhStart = settings.data?.quiet_hours_start ?? 23
+  const qhEnd = settings.data?.quiet_hours_end ?? 7
+  const browserMode = settings.data?.apply_browser_mode ?? 'chromium_ephemeral'
+  const tripped = !!circuit?.tripped
+
+  return (
+    <SettingsCard
+      title="Auto-Apply"
+      subtitle="The bot picks up approved jobs and (slice 4+) submits them. Off by default; flip the kill switch only when you trust the queue."
+    >
+      {tripped ? (
+        <div className="px-6 py-4 border-b border-zinc-900/10 dark:border-zinc-100/10 bg-orange-50 dark:bg-orange-950/30 flex items-center gap-3">
+          <FiAlertOctagon className="h-5 w-5 text-orange-500 shrink-0" />
+          <div className="flex-1 min-w-0 text-sm">
+            <div className="font-medium">Circuit breaker tripped — apply loop halted</div>
+            <div className="text-xs text-zinc-600 dark:text-zinc-400">
+              Reason: <span className="font-mono">{circuit?.reason ?? 'unknown'}</span>
+              {circuit?.tripped_at ? <> · {formatRelative(circuit.tripped_at)}</> : null}
+              {circuit?.consecutive_failures
+                ? <> · {circuit.consecutive_failures} consecutive failures</>
+                : null}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => resetCircuit.mutate()}
+            disabled={resetCircuit.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-900 dark:border-zinc-100 px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-900"
+          >
+            <FiRefreshCw className={cn('h-3.5 w-3.5', resetCircuit.isPending && 'animate-spin')} />
+            Reset
+          </button>
+        </div>
+      ) : null}
+
+      <FieldRow
+        label="Kill switch"
+        hint="Master toggle. When off the apply loop ticks but never fires, no matter the queue contents."
+      >
+        <Toggle
+          checked={enabled}
+          onChange={(v) => updateSettings.mutate({ auto_apply_enabled: v })}
+          label="Auto-apply enabled"
+        />
+      </FieldRow>
+
+      <FieldRow
+        label="Daily cap"
+        hint="Per local day. Successful submits (real + dry-run) count; failures don't. Hard floor 1, ceiling 50."
+      >
+        <TextInput
+          type="number"
+          min={1}
+          max={50}
+          value={cap}
+          onChange={(e) => {
+            const n = Math.round(Number(e.target.value))
+            if (Number.isFinite(n) && n >= 1 && n <= 50 && n !== cap) {
+              updateSettings.mutate({ daily_apply_cap: n })
+            }
+          }}
+        />
+      </FieldRow>
+
+      <FieldRow
+        label="Quiet hours"
+        hint="Local 24h. Wrap supported (e.g. 23 → 7 means no apply between 11pm and 7am). Set both to the same value to disable."
+        align="start"
+      >
+        <div className="flex items-center gap-2">
+          <TextInput
+            type="number"
+            min={0}
+            max={23}
+            value={qhStart}
+            onChange={(e) => {
+              const n = Math.round(Number(e.target.value))
+              if (Number.isFinite(n) && n >= 0 && n <= 23 && n !== qhStart) {
+                updateSettings.mutate({ quiet_hours_start: n })
+              }
+            }}
+            className="!w-20"
+          />
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">→</span>
+          <TextInput
+            type="number"
+            min={0}
+            max={23}
+            value={qhEnd}
+            onChange={(e) => {
+              const n = Math.round(Number(e.target.value))
+              if (Number.isFinite(n) && n >= 0 && n <= 23 && n !== qhEnd) {
+                updateSettings.mutate({ quiet_hours_end: n })
+              }
+            }}
+            className="!w-20"
+          />
+          <span className="text-xs text-zinc-500 dark:text-zinc-400 ml-2">
+            local hours (0-23)
+          </span>
+        </div>
+      </FieldRow>
+
+      <FieldRow
+        label="Browser mode"
+        hint="Playwright acquisition strategy. Ephemeral is safest for dry-runs; attached_chrome ships in slice 5 and requires a dedicated Chrome --remote-debugging-port profile."
+        align="start"
+      >
+        <Select
+          value={browserMode}
+          onChange={(v) => updateSettings.mutate({ apply_browser_mode: v })}
+          options={[
+            { value: 'chromium_ephemeral', label: 'chromium_ephemeral (fresh launch, no profile)' },
+            { value: 'chromium_persistent', label: 'chromium_persistent (Playwright + user_data_dir)' },
+            { value: 'attached_chrome', label: 'attached_chrome (CDP into real Chrome — needs setup)' },
+          ]}
+        />
+      </FieldRow>
+
+      {browserMode === 'attached_chrome' ? <AttachedChromePanel /> : null}
+    </SettingsCard>
+  )
+}
+
+/**
+ * Attached-Chrome connectivity verifier.
+ *
+ * Surfaces the exact ``Google Chrome`` launch command (Chrome 136+
+ * requires ``--user-data-dir`` for the debug port) and a Test
+ * Connection button. The backend tries CDP attach, reports Chrome
+ * version + open tab count + whether a LinkedIn session is detected.
+ * Operator-facing: this is the bridge between "I clicked the toggle"
+ * and "the bot can actually drive my Chrome."
+ */
+function AttachedChromePanel() {
+  const test = useMutation({
+    mutationFn: () => api.testAttachedChrome(),
+  })
+  const result = test.data
+
+  return (
+    <div className="px-6 py-4 border-t border-zinc-900/10 dark:border-zinc-100/10">
+      <div className="text-sm font-medium mb-2 flex items-center gap-2">
+        <FiZap className="h-4 w-4 text-amber-500" />
+        Attached Chrome — connection check
+      </div>
+      <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3 leading-snug">
+        Launch Chrome with a dedicated debug profile, sign into LinkedIn in
+        that window, then click Test. The bot will reuse that browser
+        session for every apply attempt — that's how it bypasses the auth
+        wall ephemeral mode hits today.
+      </p>
+
+      <pre className="text-[11px] font-mono bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md p-2 overflow-x-auto mb-3">
+        /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \{'\n'}
+        {'  '}--remote-debugging-port=9222 \{'\n'}
+        {'  '}--user-data-dir="$HOME/chrome-debug-profile"
+      </pre>
+
+      <button
+        type="button"
+        onClick={() => test.mutate()}
+        disabled={test.isPending}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-900 dark:border-zinc-100 px-3 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-900"
+      >
+        <FiRefreshCw className={cn('h-3.5 w-3.5', test.isPending && 'animate-spin')} />
+        {test.isPending ? 'Testing…' : 'Test Connection'}
+      </button>
+
+      {result ? (
+        <div
+          className={cn(
+            'mt-3 rounded-lg border p-3 text-xs',
+            result.ok
+              ? 'border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/30'
+              : 'border-rose-500/40 bg-rose-50 dark:bg-rose-950/30',
+          )}
+        >
+          <div className="flex items-center gap-2 font-medium mb-1">
+            {result.ok ? (
+              <FiCheck className="h-4 w-4 text-emerald-600" />
+            ) : (
+              <FiX className="h-4 w-4 text-rose-600" />
+            )}
+            {result.ok ? 'Connected to Chrome' : 'Could not connect'}
+            <span className="text-zinc-500 dark:text-zinc-400 font-normal">
+              · port {result.port}
+            </span>
+          </div>
+          <div className="text-zinc-700 dark:text-zinc-300 leading-snug">
+            {result.hint}
+          </div>
+          {result.ok ? (
+            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-zinc-600 dark:text-zinc-400">
+              <div>chrome: <span className="font-mono">{result.chrome_version}</span></div>
+              <div>contexts: <span className="font-mono">{result.contexts}</span></div>
+              <div>tabs open: <span className="font-mono">{result.pages_open}</span></div>
+              <div>
+                linkedin session:{' '}
+                <span className={cn(
+                  'font-mono',
+                  result.linkedin_session_detected ? 'text-emerald-700' : 'text-amber-700',
+                )}>
+                  {result.linkedin_session_detected ? 'yes ✓' : 'no — sign in first'}
+                </span>
+              </div>
+              {result.sample_urls && result.sample_urls.length > 0 ? (
+                <div className="col-span-2 truncate">
+                  sample tab: <span className="font-mono text-zinc-500">{result.sample_urls[0]}</span>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              {result.error ? (
+                <div className="mt-2 text-[11px] font-mono text-rose-700 dark:text-rose-300 break-all">
+                  {result.error}
+                </div>
+              ) : null}
+              {result.command ? (
+                <pre className="mt-2 text-[11px] font-mono bg-white/60 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 rounded p-2 overflow-x-auto">
+                  {result.command}
+                </pre>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }

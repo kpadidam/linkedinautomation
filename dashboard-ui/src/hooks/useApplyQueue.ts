@@ -34,6 +34,26 @@ export function useApproveJob() {
 }
 
 /**
+ * Operator-initiated immediate apply on a single job. Bypasses the
+ * 5-minute apply-loop tick and the pacing gates — the bot fires
+ * Playwright synchronously. Still respects the circuit breaker.
+ *
+ * Returns the resulting ``ApplicationRun`` summary so the UI can
+ * navigate the operator straight to /apply-runs to watch it.
+ */
+export function useApplyNow() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (jobId: string) => api.applyNow(jobId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['apply-runs'] })
+      qc.invalidateQueries({ queryKey: ['apply-queue'] })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
+}
+
+/**
  * Skip a single job: backend flips ``apply_status`` to
  * ``skipped_by_operator``. Sticky — the matcher will not re-promote it
  * to ``eligible`` on a future rerun.

@@ -7,12 +7,14 @@ import {
   FiExternalLink,
   FiImage,
   FiRefreshCw,
+  FiRotateCw,
 } from 'react-icons/fi'
 import { EmptyState } from '@/components/EmptyState'
 import { api } from '@/lib/api'
 import {
   useApplyRuns,
   useCircuitStatus,
+  useRePromoteJob,
   useResetCircuit,
 } from '@/hooks/useApplyRuns'
 import { useJobs } from '@/hooks/useJobs'
@@ -229,6 +231,22 @@ function RunRow({
 }
 
 function RunDetail({ run, job }: { run: ApplicationRun; job: Job | undefined }) {
+  const rePromote = useRePromoteJob()
+  // Only show the button if the job is currently in a re-promotable
+  // state. Mirrors the backend's _REPROMOTABLE_STATES set — keep in sync.
+  const canRePromote =
+    job != null &&
+    [
+      'dry_run_complete',
+      'skipped_by_operator',
+      'skipped_duplicate',
+      'skipped_requires_cover_letter',
+      'failed_retryable',
+      'failed_terminal',
+      'failed_unavailable',
+      'not_eligible',
+    ].includes(job.apply_status ?? '')
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -265,6 +283,26 @@ function RunDetail({ run, job }: { run: ApplicationRun; job: Job | undefined }) 
       {run.error_message ? (
         <div className="text-xs text-rose-700 dark:text-rose-300 font-mono whitespace-pre-wrap">
           {run.error_message}
+        </div>
+      ) : null}
+
+      {canRePromote ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => rePromote.mutate(run.job_id)}
+            disabled={rePromote.isPending}
+            className="btn-ghost !py-1 !px-3 text-xs"
+            title={`Flip apply_status (${job?.apply_status}) back to 'approved' so the apply loop will retry this job`}
+          >
+            <FiRotateCw
+              className={cn('h-3.5 w-3.5', rePromote.isPending && 'animate-spin')}
+            />
+            Re-promote to queue
+          </button>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            current: <span className="font-mono">{job?.apply_status}</span>
+          </span>
         </div>
       ) : null}
 

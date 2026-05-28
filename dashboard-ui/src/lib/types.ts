@@ -118,6 +118,7 @@ export interface ApplicationRun {
     | 'blocked_auth'
     | 'failed_retryable'
     | 'failed_terminal'
+    | 'failed_unavailable'
     | string
   started_at: string | null
   ended_at: string | null

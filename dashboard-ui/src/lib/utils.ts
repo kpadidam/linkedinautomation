@@ -68,6 +68,8 @@ export function applyRunStateColor(state?: string | null): string {
     case 'blocked_captcha':
     case 'blocked_auth':
       return 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300'
+    case 'failed_unavailable':
+      return 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200'
     case 'failed_terminal':
       return 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
     default:
@@ -93,8 +95,8 @@ export function statusLabel(status?: string | null): string {
 
 export function nextActionFor(status?: string | null): string {
   switch (status) {
-    case 'new': return 'Review'
-    case 'saved': return 'Tailor resume'
+    case 'new': return 'Apply'
+    case 'saved': return 'Apply'
     case 'tailoring_resume': return 'Apply'
     case 'applied': return 'Follow up'
     case 'recruiter_screen': return 'Prep call'
@@ -103,7 +105,7 @@ export function nextActionFor(status?: string | null): string {
     case 'interviewing': return 'Prep'
     case 'offer': return 'Negotiate'
     case 'rejected': return '—'
-    default: return 'Review'
+    default: return 'Apply'
   }
 }
 

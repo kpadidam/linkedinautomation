@@ -167,7 +167,85 @@ metadata + inline screenshots, screenshot serving works via
 - Cosmetic: a "Re-promote" action would let the operator turn
   `dry_run_complete` back into `approved` to re-test. Defer to slice 4.
 
-### Slice 4 — Greenhouse adapter (first real applies) ⬜
+### Polish (deferred — do before slice 4 ships)
+
+Small wins that pay off once real submits land. Bundled as ~2-3 hours of
+work, low risk, no architecture change.
+
+- **Settings tab in dashboard** — toggle `auto_apply_enabled` / daily
+  cap / quiet hours / browser mode + browser-mode wizard (CDP attach
+  instructions for slice 5). Without this the only way to flip the
+  kill switch is `venv/bin/python` against the DB, which is hostile
+  the moment something goes wrong at midnight.
+- **404 detection in `services/apply_runner.py`** — LinkedIn returns a
+  "Page not found" template for removed jobs; current runner classifies
+  it as `submitted_dry_run`. Add an early check (page title / canonical
+  URL match) and set state `failed_unavailable` instead. ~30 min.
+- **Re-promote action** — UI button / endpoint that turns
+  `dry_run_complete` back into `approved` for re-testing without DB
+  poking. ~15 min.
+
+### Slice 4 — Greenhouse adapter 🟡 in tree, uncommitted
+
+ATS framework + Greenhouse implementation. Framework lifted from
+paircode peer fan-out (4 peers, one ATS each, single PR integration).
+
+| | Work | Files |
+|---|---|---|
+| 🟡 | `ATSAdapter` ABC + `ApplyResult`/`ApplyStatus`/`FormField`/`ATSKind` enums + `detect_ats(url, page)` + `@register_adapter` registry | `services/ats/base.py`, `services/ats/__init__.py` |
+| 🟡 | `field_map.yaml` heuristic regex → profile-key map (operator-editable) | `services/ats/field_map.yaml` |
+| 🟡 | `services/dedup.py` — cross-source identity hash (normalized company + title + location), 90-day window, blocking-state filter | `services/dedup.py` |
+| 🟡 | `services/ats/llm_fallback.py` — cached free-text Q&A via Groq → OpenAI fallback; uses existing analysis_cache table | `services/ats/llm_fallback.py` |
+| 🟡 | `services/ats/greenhouse.py` — peer-a-codex deliverable. URL patterns, recognize(), cover-letter detection (SKIPPED_REQUIRES_COVER_LETTER), submit + confirmation polling | `services/ats/greenhouse.py` |
+| 🟡 | `apply_runner.py` — dedup pre-check, detect_ats() dispatch, adapter outcome mirroring to Job.apply_status, form_log persistence | `services/apply_runner.py` |
+
+**Verified end-to-end:** Runner against synthetic Greenhouse URL produced
+`state=submitted_dry_run, ats=greenhouse, 3 screenshots, 2 form_log entries`.
+
+### Slice 5 — LinkedIn Easy Apply + attached_chrome + pacing 🟡 in tree, uncommitted
+
+| | Work | Files |
+|---|---|---|
+| 🟡 | `services/ats/easyapply.py` — peer-b-gemini deliverable. Multi-step modal walk (up to 8 steps), auth-wall preflight, captcha-in-modal sniff, save-and-submit-later detection (NEEDS_USER_INPUT), lognormal-typed keystrokes, hover-before-click, modal-signature mutation polling, resume-radio filename matching | `services/ats/easyapply.py` |
+| 🟡 | `services/browser_acquirer.py` — attached_chrome mode hardened. Connection failure surfaces operator-actionable error (Chrome 136+ debug-profile constraint with exact command). Empty-context guard | `services/browser_acquirer.py` |
+| 🟡 | `services/pacing.py` — weekend cap multiplier (0.4×). `_effective_daily_cap()` adjusts per local weekday. Lognormal gap, quiet hours, circuit/toggle gates all in place from slice 3 | `services/pacing.py` |
+
+### Slice 6 — Workday / Lever / Ashby + universal fallback 🟡 in tree, uncommitted
+
+| | Work | Files |
+|---|---|---|
+| 🟡 | `services/ats/workday.py` — peer-c-codex deliverable. data-automation-id selectors, multi-page wizard walk (8 page cap), EEO opt-out (Prefer-not-to-say), no account creation per paircode r2, file uploads via hidden input | `services/ats/workday.py` |
+| 🟡 | `services/ats/lever.py` — peer-d-gemini deliverable. Single-page form walk, custom-question logging, /thanks confirmation detection | `services/ats/lever.py` |
+| 🟡 | `services/ats/ashby.py` — peer-d-gemini deliverable. React-rendered form, aria-label-anchored selectors, role=combobox custom-dropdown handling | `services/ats/ashby.py` |
+| 🟡 | `services/ats/universal_fallback.py` — `UniversalAdapter` scaffold for browser-use opt-in. Currently returns NEEDS_USER_INPUT — full browser-use wiring ships after operator validates the 5 hardcoded adapters | `services/ats/universal_fallback.py` |
+
+**Verified registry**: all 5 hardcoded adapters register and dispatch
+correctly on synthetic URLs (boards.greenhouse.io / linkedin.com/jobs/view /
+myworkdayjobs.com / jobs.lever.co / jobs.ashbyhq.com) and via DOM
+recognize() probes.
+
+**Open follow-ups from peer reports:**
+- 🐛 `peer-d`: Lever EEO section lives in `#eeo-frame` iframe — walker
+  doesn't descend, required-EEO postings will skip
+- 🐛 `peer-d`: Ashby progressive-disclosure "Add work experience" sections
+  not expanded; common case is they're optional
+- 🐛 `peer-b`: `_MAX_STEPS=8` is a safety net; 9+-step Easy Apply variants
+  return NEEDS_USER_INPUT instead of proceeding
+- 🐛 `peer-b`: resume-radio defaults to "first option" when filename match
+  fails — could submit stale resume when operator has multiple
+- ⚠ `peer-c`: Workday account-creation bypass returns NEEDS_USER_INPUT;
+  no auto-signin (deferred to slice 6 even with creds)
+- ⚠ `UserProfile` missing fields the adapters need: `phone`, `linkedin_url`,
+  `years_experience`, `current_company`, `city`, `country`,
+  `work_authorized`, `needs_sponsorship`. Currently `getattr` defaults
+  to None → adapter logs `source=skipped`. Add Settings UI for these
+  before flipping any adapter to non-dry-run.
+- ⚠ No real LLM call from `llm_fallback` yet — slice 4's adapters
+  intentionally heuristic-only during initial calibration. Wire in slice
+  4.5 once the operator has reviewed enough dry-run form_log entries to
+  trust the cache.
+- ⚠ `UniversalAdapter` (browser-use) is scaffold only — slice 6 ships
+  the actual LLM-driven flow after hardcoded adapters are validated
 `ats/base.py` + `ats/greenhouse.py` + `field_map.yaml` + `llm_fallback.py`
 + `dedup.py`. Behavioral-noise session-state realism layer. Real submits
 behind `auto_apply_enabled=true`. Lower ToS risk than LinkedIn — ships

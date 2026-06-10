@@ -61,10 +61,16 @@ logger = logging.getLogger(__name__)
 # one place. Order matters — first hit wins.
 
 _APPLY_BUTTON_SELECTORS = (
+    # LinkedIn shipped a DOM change ca. mid-2026: the Easy Apply
+    # affordance is now an <a> with aria-label="Easy Apply to this job",
+    # not the old <button>. Match both elements + both attribute paths
+    # so we keep working through either shape.
+    "a[aria-label*='Easy Apply' i]",
+    "button[aria-label*='Easy Apply' i]",
+    "a:has-text('Easy Apply')",
+    "button:has-text('Easy Apply')",
     "button[data-test='jobs-apply-button']",
     "button.jobs-apply-button",
-    "button[aria-label*='Easy Apply' i]",
-    "button:has-text('Easy Apply')",
 )
 
 _MODAL_SELECTORS = (
@@ -327,7 +333,28 @@ class EasyApplyAdapter(ATSAdapter):
             )
 
         # --- 2. Locate + click Easy Apply button ----------------------
+        # CSS-selector pass first (cheapest + most precise via aria-label).
+        # If selectors miss, fall through to Playwright's accessible-name
+        # search across BOTH roles (button + link, since LinkedIn ships
+        # the affordance as an <a> now).
         apply_btn = await self._first_visible(page, _APPLY_BUTTON_SELECTORS)
+        if apply_btn is None:
+            for role in ("link", "button"):
+                try:
+                    loc = page.get_by_role(
+                        role, name=re.compile(r"easy\s*apply", re.IGNORECASE)
+                    ).first
+                    if await loc.count() > 0:
+                        try:
+                            if await loc.is_visible(timeout=1500):
+                                apply_btn = loc
+                                break
+                        except Exception:  # noqa: BLE001
+                            apply_btn = loc
+                            break
+                except Exception:  # noqa: BLE001
+                    continue
+
         if apply_btn is None:
             await shot("00_no_apply_button.png")
             return ApplyResult(

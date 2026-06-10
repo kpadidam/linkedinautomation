@@ -254,7 +254,12 @@ async def run_dry_apply(job: Job, profile, db: Session) -> ApplicationRun:
             return run
 
         adapter = adapter_cls()
-        adapter_dry_run = True  # slice 4 forces dry_run regardless of operator flag
+        # Operator's auto_apply_enabled toggle gates real submission.
+        # When False: adapter parses + screenshots + parks at Submit
+        # without clicking (audit-only). When True: adapter is allowed
+        # to actually click Submit. Default-False on a fresh DB; the
+        # operator must explicitly enable it from Settings.
+        adapter_dry_run = not bool(getattr(profile, "auto_apply_enabled", False))
         try:
             result = await adapter.apply(
                 page=page,

@@ -98,3 +98,40 @@ export interface JobUpdate {
   notes?: string
   labels?: string[]
 }
+
+/**
+ * One attempt by the auto-apply loop to apply to one job.
+ * See database/models.py::ApplicationRun for the state taxonomy.
+ */
+export interface ApplicationRun {
+  id: number
+  job_id: string
+  ats: string
+  state:
+    | 'opened'
+    | 'form_parsed'
+    | 'needs_user_input'
+    | 'ready_to_submit'
+    | 'submitted'
+    | 'submitted_dry_run'
+    | 'blocked_captcha'
+    | 'blocked_auth'
+    | 'failed_retryable'
+    | 'failed_terminal'
+    | 'failed_unavailable'
+    | string
+  started_at: string | null
+  ended_at: string | null
+  exit_reason: string | null
+  screenshot_paths: string[]
+  form_log: unknown[]
+  error_message: string | null
+  dedup_key: string | null
+}
+
+export interface CircuitStatus {
+  tripped: boolean
+  tripped_at: string | null
+  reason: string | null
+  consecutive_failures: number
+}

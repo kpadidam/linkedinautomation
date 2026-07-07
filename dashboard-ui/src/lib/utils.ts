@@ -40,6 +40,43 @@ export function effectiveMatchScore(job: {
   return null
 }
 
+/**
+ * Tailwind chip classes for an ``ApplicationRun.state`` value. Keeps the
+ * UI's color story aligned with the state semantics in
+ * database/models.py::ApplicationRun.
+ *
+ * Buckets:
+ *   in-flight   → amber  (opened, form_parsed, ready_to_submit, needs_user_input)
+ *   success     → green  (submitted)
+ *   dry-run     → blue   (submitted_dry_run)
+ *   blocked     → orange (blocked_*)  — operator action needed
+ *   failed-soft → amber  (failed_retryable)
+ *   failed-hard → red    (failed_terminal)
+ */
+export function applyRunStateColor(state?: string | null): string {
+  switch (state) {
+    case 'submitted':
+      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+    case 'submitted_dry_run':
+      return 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
+    case 'opened':
+    case 'form_parsed':
+    case 'ready_to_submit':
+    case 'needs_user_input':
+    case 'failed_retryable':
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+    case 'blocked_captcha':
+    case 'blocked_auth':
+      return 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300'
+    case 'failed_unavailable':
+      return 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200'
+    case 'failed_terminal':
+      return 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+    default:
+      return 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+  }
+}
+
 export function scoreColor(score?: number | null): string {
   if (score == null) return 'bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
   if (score >= 90) return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
@@ -58,8 +95,8 @@ export function statusLabel(status?: string | null): string {
 
 export function nextActionFor(status?: string | null): string {
   switch (status) {
-    case 'new': return 'Review'
-    case 'saved': return 'Tailor resume'
+    case 'new': return 'Apply'
+    case 'saved': return 'Apply'
     case 'tailoring_resume': return 'Apply'
     case 'applied': return 'Follow up'
     case 'recruiter_screen': return 'Prep call'
@@ -68,7 +105,7 @@ export function nextActionFor(status?: string | null): string {
     case 'interviewing': return 'Prep'
     case 'offer': return 'Negotiate'
     case 'rejected': return '—'
-    default: return 'Review'
+    default: return 'Apply'
   }
 }
 

@@ -1,0 +1,72 @@
+# Heuristic field-label → profile-key map.
+#
+# Used by every concrete ATS adapter to resolve common fields without an
+# LLM call. The matcher is regex-based and case-insensitive; first match
+# wins. Add patterns freely — false negatives just route to the LLM
+# fallback, which is fine. False POSITIVES are worse — be specific.
+#
+# profile_key is dotted-path notation against the UserProfile row:
+#   - "name.first"  -> first word of profile.name
+#   - "name.last"   -> last word of profile.name
+#   - "email"       -> profile.email
+#   - "phone"       -> profile.phone        (TODO: add to UserProfile schema)
+#   - "linkedin"    -> profile.linkedin_url (TODO)
+#   - "github"      -> derived from profile.resume_text
+#   - "resume_file" -> path to the operator's PDF
+#   - "years_experience" -> profile.years_experience  (TODO)
+#
+# Adapters that find a label matching a pattern but lacking a profile
+# value should fall through to the LLM (so the operator's filled value
+# gets surfaced + cached, not just dropped).
+
+mappings:
+  - pattern: '^(first[\s_-]?name|given[\s_-]?name)$'
+    profile_key: name.first
+
+  - pattern: '^(last[\s_-]?name|surname|family[\s_-]?name)$'
+    profile_key: name.last
+
+  - pattern: '^(full[\s_-]?name|your[\s_-]?name|name)$'
+    profile_key: name.full
+
+  - pattern: '^(e[\s_-]?mail|email[\s_-]?address)$'
+    profile_key: email
+
+  - pattern: '^(phone|mobile|cell|telephone|contact[\s_-]?number)( number)?$'
+    profile_key: phone
+
+  - pattern: '^(linked[\s_-]?in|linkedin[\s_-]?(url|profile))$'
+    profile_key: linkedin
+
+  - pattern: '^(git[\s_-]?hub|github[\s_-]?(url|profile))$'
+    profile_key: github
+
+  - pattern: '^(portfolio|website|personal[\s_-]?(site|website))$'
+    profile_key: website
+
+  - pattern: '^(resume|cv)[\s_-]?(file|upload)?$'
+    profile_key: resume_file
+
+  - pattern: '^(years|yrs)[\s_-]?of[\s_-]?(experience|exp)$'
+    profile_key: years_experience
+
+  - pattern: '^(current|present)[\s_-]?(company|employer)$'
+    profile_key: current_company
+
+  - pattern: '^(city)$'
+    profile_key: city
+
+  - pattern: '^(country)$'
+    profile_key: country
+
+  - pattern: '^(authoriz(ed|ation)|legal(ly)?[\s_-]?(authorized|allowed))[\s_-]?to[\s_-]?work'
+    profile_key: work_auth.yes_no
+    default: 'Yes'  # operator can override per-application
+
+  - pattern: '^(require|need)[\s_-]?(visa|sponsorship)'
+    profile_key: work_auth.needs_sponsorship
+    default: 'No'
+
+# LLM fallback policy: when label matches no pattern OR profile_key
+# resolves to None/empty, the adapter calls services/ats/llm_fallback.py
+# with the field label + JD context + cached prior answers.

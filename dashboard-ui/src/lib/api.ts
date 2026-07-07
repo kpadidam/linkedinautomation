@@ -1,4 +1,12 @@
-import type { Job, JobUpdate, JobsQuery, SearchRun, Statistics } from './types'
+import type {
+  ApplicationRun,
+  CircuitStatus,
+  Job,
+  JobUpdate,
+  JobsQuery,
+  SearchRun,
+  Statistics,
+} from './types'
 
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -27,4 +35,54 @@ export const api = {
     }),
   statistics: () => http<Statistics>(`/api/statistics`),
   searches: (limit = 10) => http<SearchRun[]>(`/api/searches?limit=${limit}`),
+  applyQueue: (limit = 50) => http<Job[]>(`/api/apply/queue?limit=${limit}`),
+  applyApprove: (jobId: string) =>
+    http<{ job_id: string; apply_status: string }>(
+      `/api/apply/approve/${encodeURIComponent(jobId)}`,
+      { method: 'POST' },
+    ),
+  applySkip: (jobId: string) =>
+    http<{ job_id: string; apply_status: string }>(
+      `/api/apply/skip/${encodeURIComponent(jobId)}`,
+      { method: 'POST' },
+    ),
+  applyRePromote: (jobId: string) =>
+    http<{ job_id: string; prior_status: string; apply_status: string }>(
+      `/api/apply/re-promote/${encodeURIComponent(jobId)}`,
+      { method: 'POST' },
+    ),
+  applyNow: (jobId: string) =>
+    http<{
+      run_id: number
+      state: string
+      exit_reason: string
+      ats: string
+      screenshots: string[]
+    }>(`/api/apply/now/${encodeURIComponent(jobId)}`, { method: 'POST' }),
+  applyRuns: (limit = 50) => http<ApplicationRun[]>(`/api/apply/runs?limit=${limit}`),
+  // Build the URL only; let <img src> drive the actual fetch so the browser
+  // can cache and stream large PNGs without going through fetch().
+  applyRunScreenshotUrl: (runId: number, n: number) =>
+    `/api/apply/runs/${runId}/screenshot/${n}`,
+  circuitStatus: () => http<CircuitStatus>(`/api/apply/circuit/status`),
+  resetCircuit: () =>
+    http<{ reset: boolean; was_tripped: boolean }>(`/api/apply/circuit/reset`, {
+      method: 'POST',
+    }),
+  testAttachedChrome: (port?: number) =>
+    http<{
+      ok: boolean
+      port: number
+      chrome_version?: string
+      contexts?: number
+      pages_open?: number
+      sample_urls?: string[]
+      linkedin_session_detected?: boolean
+      error?: string
+      hint: string
+      command?: string
+    }>(
+      `/api/apply/browser/test-attached${port ? `?port=${port}` : ''}`,
+      { method: 'POST' },
+    ),
 }

@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AppShell } from '@/components/AppShell'
 import DashboardScreen from '@/screens/DashboardScreen'
 import ReviewQueueScreen from '@/screens/ReviewQueueScreen'
+import ApplyQueueScreen from '@/screens/ApplyQueueScreen'
+import ApplyRunsScreen from '@/screens/ApplyRunsScreen'
 import { Navigate } from 'react-router-dom'
 import PipelineScreen from '@/screens/PipelineScreen'
 import CalendarScreen from '@/screens/CalendarScreen'
@@ -28,6 +30,8 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<DashboardScreen />} />
           <Route path="review-queue" element={<ReviewQueueScreen />} />
+          <Route path="apply-queue" element={<ApplyQueueScreen />} />
+          <Route path="apply-runs" element={<ApplyRunsScreen />} />
           <Route path="jobs" element={<Navigate to="/review-queue" replace />} />
           <Route path="pipeline" element={<PipelineScreen />} />
           <Route path="calendar" element={<CalendarScreen />} />

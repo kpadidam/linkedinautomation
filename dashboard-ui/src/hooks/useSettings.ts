@@ -25,6 +25,14 @@ export interface AppSettings {
   search_frequency_minutes: number
   min_match_score_alert: number
   email_notifications: boolean
+  // Auto-apply (slice 3 + polish-pass UI). ``auto_apply_enabled`` is the
+  // kill switch — defaults False on every fresh DB and on the operator's
+  // first load. The UI MUST surface this prominently.
+  auto_apply_enabled: boolean
+  daily_apply_cap: number
+  quiet_hours_start: number   // 0-23, local 24h hour
+  quiet_hours_end: number     // 0-23, local 24h hour
+  apply_browser_mode: 'attached_chrome' | 'chromium_persistent' | 'chromium_ephemeral' | string
   secrets: AppSettingsSecrets
 }
 
@@ -37,6 +45,11 @@ export interface AppSettingsUpdate {
   search_frequency_minutes?: number
   min_match_score_alert?: number
   email_notifications?: boolean
+  auto_apply_enabled?: boolean
+  daily_apply_cap?: number
+  quiet_hours_start?: number
+  quiet_hours_end?: number
+  apply_browser_mode?: string
   // Secrets — empty string clears (falls back to .env). undefined = no change.
   openai_api_key?: string
   groq_api_key?: string

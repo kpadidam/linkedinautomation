@@ -138,6 +138,15 @@ class SettingsUpdateRequest(BaseModel):
     search_frequency_minutes: Optional[int] = Field(None, ge=30, le=1440)
     min_match_score_alert: Optional[float] = None
     email_notifications: Optional[bool] = None
+    # Auto-apply controls (slice 3 backend, polish-pass UI). Off by default;
+    # the operator must explicitly flip auto_apply_enabled in the Settings
+    # tab. Ranges below match the safety floors discussed in paircode r2:
+    # 1-50 applies/day, valid 24h-clock hours, three browser modes.
+    auto_apply_enabled: Optional[bool] = None
+    daily_apply_cap: Optional[int] = Field(None, ge=1, le=50)
+    quiet_hours_start: Optional[int] = Field(None, ge=0, le=23)
+    quiet_hours_end: Optional[int] = Field(None, ge=0, le=23)
+    apply_browser_mode: Optional[str] = None  # validated below in the endpoint
     # Secrets: empty string => clear (use .env fallback). null => no change.
     openai_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
@@ -174,6 +183,19 @@ def _run_sqlite_migrations() -> None:
         ("jobs", "match_computed_at", "DATETIME"),
         ("user_profile", "auto_match_enabled", "BOOLEAN DEFAULT 1"),
         ("user_profile", "match_percentile_threshold", "INTEGER DEFAULT 90"),
+        # Auto-apply loop (slice 3) — safe defaults: bot is off until the
+        # operator explicitly enables it.
+        ("user_profile", "auto_apply_enabled", "BOOLEAN DEFAULT 0"),
+        ("user_profile", "daily_apply_cap", "INTEGER DEFAULT 15"),
+        ("user_profile", "quiet_hours_start", "INTEGER DEFAULT 23"),
+        ("user_profile", "quiet_hours_end", "INTEGER DEFAULT 7"),
+        ("user_profile", "last_apply_at", "DATETIME"),
+        ("user_profile", "circuit_tripped", "BOOLEAN DEFAULT 0"),
+        ("user_profile", "circuit_tripped_at", "DATETIME"),
+        ("user_profile", "circuit_tripped_reason", "VARCHAR(200)"),
+        ("user_profile", "circuit_consecutive_failures", "INTEGER DEFAULT 0"),
+        ("user_profile", "apply_browser_mode", "VARCHAR(50) DEFAULT 'chromium_ephemeral'"),
+        ("user_profile", "attached_chrome_port", "INTEGER DEFAULT 9222"),
     ]
     try:
         with engine.begin() as conn:
@@ -245,6 +267,115 @@ async def _auto_search_loop():
 
 
 _auto_search_task: Optional[asyncio.Task] = None
+_match_loop_task: Optional[asyncio.Task] = None
+_apply_loop_task: Optional[asyncio.Task] = None
+
+
+async def _match_loop():
+    """Periodic matcher tick. Embeds any Job that lacks a JobEmbedding row.
+
+    Cadence: every 10 minutes. Skips when ``auto_match_enabled`` is off
+    or the scrape session is mid-flight (Playwright + transformer model
+    in the same process is fine but the loops shouldn't fight for the
+    DB locks). Uses the same scoring path as ``POST /api/match/run`` —
+    this just removes the manual trigger.
+    """
+
+    TICK_SECONDS = 60
+    INTERVAL_MINUTES = 10
+    last_run_at: Optional[datetime] = None
+    while True:
+        try:
+            await asyncio.sleep(TICK_SECONDS)
+            if session_manager.is_running:
+                continue
+            now = datetime.utcnow()
+            due = (
+                last_run_at is None
+                or (now - last_run_at) >= timedelta(minutes=INTERVAL_MINUTES)
+            )
+            if not due:
+                continue
+            db = next(get_db())
+            try:
+                profile = db_manager.get_or_create_user_profile(db)
+                if not getattr(profile, "auto_match_enabled", True):
+                    continue
+                # Reuse the POST /api/match/run handler body would be neat
+                # but it expects a Depends-injected db; calling the inner
+                # core directly here keeps the loop independent of FastAPI
+                # dependency injection. For slice 3 we just invoke the
+                # endpoint function with our own session.
+                result = await match_run(limit=200, force=False, db=db)
+                last_run_at = now
+                if result.get("processed", 0) > 0:
+                    logger.info(f"[match_loop] {result}")
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"match loop tick failed: {e}")
+
+
+async def _apply_loop():
+    """Periodic apply tick. Picks one approved job, runs a dry navigation.
+
+    Cadence: every 5 minutes. The actual cadence between firings is
+    governed by ``services.pacing.should_apply_now`` (lognormal gap
+    around ~40min, quiet hours, daily cap). The 5-minute tick is just
+    how often we *consider* firing.
+
+    Slice 3 calls ``apply_runner.run_dry_apply`` — that's a navigation
+    + screenshot + state write, never a real submit.
+    """
+
+    TICK_SECONDS = 60
+    INTERVAL_MINUTES = 5
+    last_check_at: Optional[datetime] = None
+    while True:
+        try:
+            await asyncio.sleep(TICK_SECONDS)
+            now = datetime.utcnow()
+            due = (
+                last_check_at is None
+                or (now - last_check_at) >= timedelta(minutes=INTERVAL_MINUTES)
+            )
+            if not due:
+                continue
+            last_check_at = now
+
+            db = next(get_db())
+            try:
+                from services.pacing import should_apply_now
+                from services.apply_runner import run_dry_apply
+
+                profile = db_manager.get_or_create_user_profile(db)
+                decision = should_apply_now(profile, db, now=now)
+                if not decision.allowed:
+                    logger.debug(f"[apply_loop] skip: {decision.reason}")
+                    continue
+
+                job = (
+                    db.query(Job)
+                    .filter(Job.apply_status == "approved")
+                    .filter(Job.url.isnot(None))
+                    .order_by(Job.match_score.desc().nulls_last())
+                    .first()
+                )
+                if job is None:
+                    continue
+
+                logger.info(
+                    f"[apply_loop] firing dry-run on {job.job_id} ({job.title})"
+                )
+                await run_dry_apply(job, profile, db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"apply loop tick failed: {e}")
 
 
 @app.on_event("startup")
@@ -271,8 +402,12 @@ async def startup_event():
         logger.info("Resume matcher service initialized")
         
         # Kick off the auto-search scheduler (no-op if user has it disabled).
-        global _auto_search_task
+        global _auto_search_task, _match_loop_task, _apply_loop_task
         _auto_search_task = asyncio.create_task(_auto_search_loop())
+        # Slice 3 loops: match (every 10 min) + dry-run apply (every 5 min,
+        # pacing-gated). Both no-op if their respective toggles are off.
+        _match_loop_task = asyncio.create_task(_match_loop())
+        _apply_loop_task = asyncio.create_task(_apply_loop())
 
         logger.info(f"{settings.app_name} started successfully")
 
@@ -588,6 +723,19 @@ def _settings_doc(profile) -> Dict[str, Any]:
         "search_frequency_minutes": _effective_frequency_minutes(profile),
         "min_match_score_alert": float(profile.min_match_score_alert or 0.0),
         "email_notifications": bool(profile.email_notifications),
+        # Auto-apply (slice 3). Surface defaults defensively so the UI can
+        # render even on a fresh DB before migrations populate columns.
+        "auto_apply_enabled": bool(getattr(profile, "auto_apply_enabled", False)),
+        "daily_apply_cap": int(getattr(profile, "daily_apply_cap", 15) or 15),
+        "quiet_hours_start": int(
+            getattr(profile, "quiet_hours_start", 23) if getattr(profile, "quiet_hours_start", None) is not None else 23
+        ),
+        "quiet_hours_end": int(
+            getattr(profile, "quiet_hours_end", 7) if getattr(profile, "quiet_hours_end", None) is not None else 7
+        ),
+        "apply_browser_mode": (
+            getattr(profile, "apply_browser_mode", None) or "chromium_ephemeral"
+        ),
         "secrets": {
             "openai_configured": openai_ok,
             "openai_source": openai_src,
@@ -701,6 +849,27 @@ async def update_settings(
         prev = db_manager.get_or_create_user_profile(db)
         if not prev.auto_search_enabled:
             updates["last_auto_search"] = datetime.utcnow()
+
+    # Validate apply_browser_mode against the acquirer's known set.
+    if "apply_browser_mode" in updates and updates["apply_browser_mode"] is not None:
+        from services.browser_acquirer import VALID_MODES
+        if updates["apply_browser_mode"] not in VALID_MODES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"apply_browser_mode must be one of {VALID_MODES}",
+            )
+
+    # Quiet hours sanity — same value top and bottom is fine (means "no quiet
+    # window"), but reject obvious typos like 25 (caught by Field range too).
+    if "quiet_hours_start" in updates or "quiet_hours_end" in updates:
+        prev = db_manager.get_or_create_user_profile(db)
+        s = updates.get("quiet_hours_start", prev.quiet_hours_start)
+        e = updates.get("quiet_hours_end", prev.quiet_hours_end)
+        if s is not None and e is not None and not (0 <= s <= 23 and 0 <= e <= 23):
+            raise HTTPException(
+                status_code=400,
+                detail="quiet_hours_* must be 0-23 (24h local)",
+            )
 
     if updates:
         success = db_manager.update_user_profile(db, **updates)
@@ -1192,13 +1361,19 @@ async def match_run(
             f"semantic {result.semantic:.2f} · keyword {result.keyword:.2f}"
         )
         job.match_reasons = reason_strs
+        # Operator/runtime states are sticky — the matcher must not flip an
+        # approved/applied/skipped job back to eligible on a rerun. Only
+        # mutate apply_status when it's a matcher-owned value.
+        matcher_owned = job.apply_status in (None, "", "eligible", "not_eligible")
         if result.rejected_by is not None:
-            job.apply_status = "not_eligible"
+            if matcher_owned:
+                job.apply_status = "not_eligible"
             rejected += 1
         else:
             scores.append(result.raw_score)
             passes = gate(result.raw_score, scores, percentile)
-            job.apply_status = "eligible" if passes else "not_eligible"
+            if matcher_owned:
+                job.apply_status = "eligible" if passes else "not_eligible"
             if scores:
                 rank = sum(1 for s in scores if s <= result.raw_score) / len(scores)
                 job.match_score_percentile = round(rank * 100, 2)
@@ -1233,6 +1408,356 @@ async def match_candidates(
     q = q.filter(Job.match_score.isnot(None))
     rows = q.order_by(Job.match_score.desc()).limit(limit).all()
     return [j.to_dict() for j in rows]
+
+
+# ---------------------------------------------------------------------------
+# Apply Queue (slice 2 — operator approval surface; no apply logic yet)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/apply/queue")
+async def apply_queue(
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """Eligible jobs awaiting operator approval, score-sorted descending.
+
+    This is the operator-facing list that powers the Apply Queue screen.
+    Once the operator clicks Approve, ``apply_status`` flips to
+    ``approved`` and slice 3's ``_apply_loop`` will pick it up. Skipped
+    jobs (``skipped_by_operator``) are sticky — the matcher leaves them
+    alone on subsequent reruns.
+    """
+
+    rows = (
+        db.query(Job)
+        .filter(Job.applied.is_(False))
+        .filter(Job.apply_status == "eligible")
+        .filter(Job.match_score.isnot(None))
+        .order_by(Job.match_score.desc())
+        .limit(limit)
+        .all()
+    )
+    return [j.to_dict() for j in rows]
+
+
+@app.post("/api/apply/approve/{job_id}")
+async def apply_approve(job_id: str, db: Session = Depends(get_db)):
+    """Operator-driven approval: flip ``eligible`` → ``approved``.
+
+    Refuses to approve jobs that aren't in ``eligible`` state — prevents
+    accidentally re-approving an already-approved job or applying to one
+    that the matcher rejected. Slice 3's apply loop will pick approved
+    rows up; this endpoint just sets state and returns.
+    """
+
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job.apply_status != "eligible":
+        raise HTTPException(
+            400,
+            f"Job is in state '{job.apply_status}', only 'eligible' jobs can be approved.",
+        )
+    job.apply_status = "approved"
+    db.commit()
+    return {"job_id": job_id, "apply_status": "approved"}
+
+
+@app.post("/api/apply/skip/{job_id}")
+async def apply_skip(job_id: str, db: Session = Depends(get_db)):
+    """Operator-driven skip: flip ``eligible`` → ``skipped_by_operator``.
+
+    Distinct from ``not_eligible`` (matcher's signal): ``skipped_by_operator``
+    is sticky, so the next ``/api/match/run`` won't re-promote the job
+    back into the queue. To un-skip, the operator must manually flip the
+    column (no UI for that in slice 2; intentional friction).
+    """
+
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job.apply_status not in ("eligible", "approved"):
+        raise HTTPException(
+            400,
+            f"Job is in state '{job.apply_status}', cannot skip from here.",
+        )
+    job.apply_status = "skipped_by_operator"
+    db.commit()
+    return {"job_id": job_id, "apply_status": "skipped_by_operator"}
+
+
+# A job is re-promotable when it's in any terminal state the operator
+# might want to retry. ``applied`` is intentionally NOT here — re-applying
+# to the same job is almost always a mistake.
+_REPROMOTABLE_STATES = (
+    "dry_run_complete",
+    "skipped_by_operator",
+    "skipped_duplicate",
+    "skipped_requires_cover_letter",
+    "failed_retryable",
+    "failed_terminal",
+    "failed_unavailable",
+    "not_eligible",
+)
+
+
+@app.post("/api/apply/re-promote/{job_id}")
+async def apply_re_promote(job_id: str, db: Session = Depends(get_db)):
+    """Flip a job from any retryable terminal state back to ``approved``.
+
+    Lets the operator re-test a job after a dry-run, a skip, or a
+    failure — without poking SQL by hand. Refuses to re-promote
+    ``applied`` (deliberately) and active states (``applying``,
+    ``approved``, ``eligible``) since those don't make sense.
+    """
+
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job.apply_status not in _REPROMOTABLE_STATES:
+        raise HTTPException(
+            400,
+            f"Job is in state '{job.apply_status}', "
+            f"not in re-promotable set {_REPROMOTABLE_STATES}",
+        )
+    prior = job.apply_status
+    job.apply_status = "approved"
+    db.commit()
+    return {"job_id": job_id, "prior_status": prior, "apply_status": "approved"}
+
+
+@app.post("/api/apply/now/{job_id}")
+async def apply_now(job_id: str, db: Session = Depends(get_db)):
+    """Fire the apply runner for a single job RIGHT NOW.
+
+    Bypasses the 5-minute apply loop tick so the operator gets immediate
+    feedback. Still honors the kill switch indirectly: if
+    ``auto_apply_enabled`` is False, the runner stays in dry-run mode
+    (parses + screenshots + does not click Submit). If True AND the
+    detected ATS adapter supports submit, this can be a real application.
+
+    Pacing/quiet-hours/daily-cap are NOT enforced here — this is the
+    operator explicitly saying "do it now." The circuit breaker IS
+    still respected: if it's tripped, the runner refuses to spawn.
+    """
+    from services.apply_runner import run_dry_apply
+
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if not job.url:
+        raise HTTPException(400, "Job has no URL — cannot apply")
+
+    profile = db_manager.get_or_create_user_profile(db)
+    if profile.circuit_tripped:
+        raise HTTPException(
+            409,
+            f"Circuit breaker tripped ({profile.circuit_tripped_reason}). "
+            "Reset via /api/apply/circuit/reset and try again.",
+        )
+
+    # Flip to approved so anyone watching the apply queue sees the
+    # transition, then immediately fire the runner. We do NOT wait for
+    # the _apply_loop tick.
+    if job.apply_status != "approved":
+        job.apply_status = "approved"
+        db.commit()
+
+    logger.info(f"[apply_now] operator-triggered apply on {job_id} ({job.title})")
+    run = await run_dry_apply(job, profile, db)
+    db.refresh(run)
+    return {
+        "run_id": run.id,
+        "state": run.state,
+        "exit_reason": run.exit_reason,
+        "ats": run.ats,
+        "screenshots": run.screenshot_paths or [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Apply Runs + circuit breaker (slice 3)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/apply/runs")
+async def apply_runs(
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """History of dry-run apply attempts. Newest first.
+
+    Each row is one ``ApplicationRun`` — see ``database/models.py`` for the
+    full state machine. Slice 3 mostly emits ``submitted_dry_run`` /
+    ``blocked_*`` / ``failed_*``; slice 5 adds ``submitted`` (real).
+    """
+
+    from database.models import ApplicationRun
+
+    rows = (
+        db.query(ApplicationRun)
+        .order_by(ApplicationRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [r.to_dict() for r in rows]
+
+
+@app.get("/api/apply/runs/{run_id}/screenshot/{n}")
+async def apply_run_screenshot(
+    run_id: int, n: int, db: Session = Depends(get_db)
+):
+    """Serve one screenshot from an apply run, indexed 0..N-1.
+
+    Path traversal is impossible — paths are looked up via the JSON
+    column, not constructed from user input. Returns 404 if the run
+    doesn't exist, the index is out of range, or the file is gone.
+    """
+
+    from database.models import ApplicationRun
+
+    run = db.query(ApplicationRun).filter(ApplicationRun.id == run_id).first()
+    if not run:
+        raise HTTPException(404, f"Run {run_id} not found")
+    paths = run.screenshot_paths or []
+    if n < 0 or n >= len(paths):
+        raise HTTPException(404, f"Screenshot index {n} out of range")
+    path = paths[n]
+    if not _os.path.exists(path):
+        raise HTTPException(404, f"Screenshot file missing: {path}")
+    return FileResponse(path, media_type="image/png")
+
+
+@app.post("/api/apply/circuit/reset")
+async def apply_circuit_reset(db: Session = Depends(get_db)):
+    """Operator-only circuit-breaker reset.
+
+    Called after the operator investigates a tripped breaker (captcha,
+    /checkpoint/ redirect, etc.) and resolves the underlying LinkedIn
+    state. Clears ``circuit_tripped`` and the consecutive-failure
+    counter so the apply loop can resume.
+    """
+
+    from services.circuit_breaker import reset_breaker
+
+    profile = db_manager.get_or_create_user_profile(db)
+    was_tripped = bool(profile.circuit_tripped)
+    reset_breaker(profile, db)
+    return {
+        "reset": True,
+        "was_tripped": was_tripped,
+    }
+
+
+@app.post("/api/apply/browser/test-attached")
+async def apply_browser_test_attached(
+    port: Optional[int] = None, db: Session = Depends(get_db)
+):
+    """Verify that ``attached_chrome`` mode can talk to a live Chrome.
+
+    Tries ``connect_over_cdp(http://127.0.0.1:{port})`` once and returns
+    a diagnostic doc the UI can render. On failure we surface the exact
+    macOS terminal command the operator needs to run — Chrome 136+
+    requires ``--user-data-dir`` to honor the debug port, and we tell
+    them so explicitly instead of letting them debug "connection
+    refused" alone.
+
+    Does NOT spawn an apply run or open any tabs in the operator's
+    Chrome — pure connectivity check.
+    """
+
+    profile = db_manager.get_or_create_user_profile(db)
+    chosen_port = int(port or getattr(profile, "attached_chrome_port", 9222) or 9222)
+    cmd_hint = (
+        '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome '
+        f'--remote-debugging-port={chosen_port} '
+        '--user-data-dir="$HOME/chrome-debug-profile"'
+    )
+
+    # Local import: heavy
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError as e:
+        raise HTTPException(500, f"Playwright not installed: {e}")
+
+    pw = await async_playwright().start()
+    try:
+        try:
+            browser = await pw.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{chosen_port}"
+            )
+        except Exception as e:  # noqa: BLE001
+            return {
+                "ok": False,
+                "port": chosen_port,
+                "error": f"{type(e).__name__}: {str(e)[:300]}",
+                "hint": (
+                    "Chrome isn't listening on this debug port. Launch it "
+                    "with a dedicated debug profile (Chrome 136+ requires "
+                    "--user-data-dir), then sign into LinkedIn in that "
+                    "Chrome window:"
+                ),
+                "command": cmd_hint,
+            }
+
+        # Probe contexts/pages so we know there's actually a usable session.
+        contexts = browser.contexts
+        n_contexts = len(contexts)
+        n_pages = 0
+        sample_urls: list[str] = []
+        signed_into_linkedin = False
+        for ctx in contexts:
+            for page in ctx.pages:
+                n_pages += 1
+                u = page.url or ""
+                if len(sample_urls) < 5 and u and u != "about:blank":
+                    sample_urls.append(u)
+                if "linkedin.com" in u:
+                    signed_into_linkedin = True
+                # Read cookies to confirm li_at presence — that's the
+                # real signal we'll need at apply time.
+            try:
+                cookies = await ctx.cookies("https://www.linkedin.com")
+                if any(c.get("name") == "li_at" for c in cookies):
+                    signed_into_linkedin = True
+            except Exception:  # noqa: BLE001
+                pass
+
+        version = browser.version
+        await browser.close()  # detaches us; doesn't kill Chrome
+
+        return {
+            "ok": True,
+            "port": chosen_port,
+            "chrome_version": version,
+            "contexts": n_contexts,
+            "pages_open": n_pages,
+            "sample_urls": sample_urls,
+            "linkedin_session_detected": signed_into_linkedin,
+            "hint": (
+                "Connection works."
+                + ("" if signed_into_linkedin else " But this Chrome isn't signed into LinkedIn — open linkedin.com and log in in that window before running an apply.")
+            ),
+        }
+    finally:
+        try:
+            await pw.stop()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@app.get("/api/apply/circuit/status")
+async def apply_circuit_status(db: Session = Depends(get_db)):
+    """Read the breaker state. Powers the UI banner when tripped."""
+
+    profile = db_manager.get_or_create_user_profile(db)
+    return {
+        "tripped": bool(profile.circuit_tripped),
+        "tripped_at": _utc_iso(profile.circuit_tripped_at),
+        "reason": profile.circuit_tripped_reason,
+        "consecutive_failures": int(profile.circuit_consecutive_failures or 0),
+    }
 
 
 if __name__ == "__main__":
